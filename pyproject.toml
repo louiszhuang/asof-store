@@ -1,0 +1,21 @@
+[project]
+name = "asof-store"
+version = "0.1.0"
+description = "asof store provides a simple and efficient way to store and retrieve data with versioning support. It allows users to save different versions of their data and access them as needed."
+readme = "README.md"
+authors = [{ name = "Louis Zhuang", email = "yzhuang@outlook.com" }]
+requires-python = ">=3.14"
+dependencies = []
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.scripts]
+asof-store = "asof_store:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
