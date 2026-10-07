@@ -23,7 +23,6 @@ from sqlalchemy import (
     Uuid,
     create_engine,
     select,
-    update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
@@ -33,6 +32,17 @@ from . import AsOfStore
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
+
+_SORTABLE_TIMESTAMP_TYPES = {
+    int,
+    float,
+    str,
+    bytes,
+    datetime,
+    date,
+    Decimal,
+    UUID,
+}
 
 
 def _create_engine(sql_uri: str) -> Engine:
@@ -132,6 +142,15 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             if not isinstance(python_type, type):
                 raise TypeError(f"{name} must be a Python type")
 
+        if timestamp_type not in _SORTABLE_TIMESTAMP_TYPES:
+            supported_types = ", ".join(
+                sorted(python_type.__name__ for python_type in _SORTABLE_TIMESTAMP_TYPES)
+            )
+            raise TypeError(
+                f"timestamp_type must map to an indexable, sortable SQL scalar "
+                f"type ({supported_types}); got {timestamp_type.__name__}"
+            )
+
         self._engine = _create_engine(sql_uri)
         if len(table_name) > self._engine.dialect.max_identifier_length:
             self._engine.dispose()
@@ -165,75 +184,59 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             ),
         )
         index_suffix = sha256(table_name.encode()).hexdigest()[:16]
-        Index(f"ix_{index_suffix}_key", self._versions.c.key)
+        Index(
+            f"ix_{index_suffix}_key_timestamp",
+            self._versions.c.key,
+            self._versions.c.timestamp.desc(),
+        )
         metadata.create_all(self._engine)
 
     def close(self) -> None:
         self._engine.dispose()
 
-    def put(self, as_of: Timestamp, key: Key, value: Value) -> None:
+    def put(self, as_of: Timestamp, key: Key, value: Value) -> bool:
         timestamp = _encode(self._timestamp_type, as_of)
         encoded_key = _encode(self._key_type, key)
         encoded_value = _encode(self._value_type, value)
         with self._engine.begin() as connection:
-            rows = connection.execute(
-                select(self._versions.c.id, self._versions.c.timestamp).where(
-                    self._versions.c.key == encoded_key
-                )
-            )
-            row_id = next(
-                (
-                    row.id
-                    for row in rows
-                    if _decode(self._timestamp_type, row.timestamp) == as_of
-                ),
-                None,
-            )
-            if row_id is None:
-                connection.execute(
-                    self._versions.insert().values(
-                        timestamp=timestamp,
-                        key=encoded_key,
-                        value=encoded_value,
+            latest = connection.execute(
+                select(self._versions.c.timestamp, self._versions.c.value)
+                .where(self._versions.c.key == encoded_key)
+                .order_by(self._versions.c.timestamp.desc())
+                .limit(1)
+            ).first()
+
+            if latest is not None:
+                latest_timestamp = _decode(self._timestamp_type, latest.timestamp)
+                latest_value = _decode(self._value_type, latest.value)
+                if as_of >= latest_timestamp and value == latest_value:
+                    return False
+                if as_of <= latest_timestamp:
+                    raise ValueError(
+                        f"timestamp {as_of!r} must be greater than the latest "
+                        f"timestamp {latest_timestamp!r} for key {key!r}"
                     )
+
+            connection.execute(
+                self._versions.insert().values(
+                    timestamp=timestamp,
+                    key=encoded_key,
+                    value=encoded_value,
                 )
-            else:
-                connection.execute(
-                    update(self._versions)
-                    .where(self._versions.c.id == row_id)
-                    .values(value=encoded_value)
-                )
+            )
+            return True
 
     def get(self, as_of: Timestamp, key: Key) -> Value | None:
         timestamp = _encode(self._timestamp_type, as_of)
         encoded_key = _encode(self._key_type, key)
         with self._engine.connect() as connection:
-            if _uses_pickle(self._timestamp_type):
-                rows = connection.execute(
-                    select(
-                        self._versions.c.timestamp,
-                        self._versions.c.value,
-                    ).where(self._versions.c.key == encoded_key)
+            value = connection.scalar(
+                select(self._versions.c.value)
+                .where(
+                    self._versions.c.key == encoded_key,
+                    self._versions.c.timestamp <= timestamp,
                 )
-                latest_timestamp: Timestamp | None = None
-                value = None
-                for row in rows:
-                    stored_timestamp: Timestamp = _decode(
-                        self._timestamp_type, row.timestamp
-                    )
-                    if stored_timestamp <= as_of and (
-                        latest_timestamp is None or stored_timestamp > latest_timestamp
-                    ):
-                        latest_timestamp = stored_timestamp
-                        value = row.value
-            else:
-                value = connection.scalar(
-                    select(self._versions.c.value)
-                    .where(
-                        self._versions.c.key == encoded_key,
-                        self._versions.c.timestamp <= timestamp,
-                    )
-                    .order_by(self._versions.c.timestamp.desc())
-                    .limit(1)
-                )
+                .order_by(self._versions.c.timestamp.desc())
+                .limit(1)
+            )
         return _decode(self._value_type, value)

@@ -46,7 +46,8 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value](ABC):
         )
 
     @abstractmethod
-    def put(self, as_of: Timestamp, key: Key, value: Value) -> None:
+    def put(self, as_of: Timestamp, key: Key, value: Value) -> bool:
+        """Record a newer value, returning whether a new version was stored."""
         raise NotImplementedError
 
     @abstractmethod

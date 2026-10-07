@@ -1,4 +1,4 @@
-from bisect import bisect_left, bisect_right
+from bisect import bisect_right
 from typing import TYPE_CHECKING
 
 from . import AsOfStore
@@ -15,15 +15,27 @@ class MemoryBackend[Timestamp: SupportsAllComparisons, Key, Value](
     def __init__(self) -> None:
         self._versions: dict[Key, tuple[list[Timestamp], list[Value]]] = {}
 
-    def put(self, as_of: Timestamp, key: Key, value: Value) -> None:
-        timestamps, values = self._versions.setdefault(key, ([], []))
-        index = bisect_left(timestamps, as_of)
-        if index < len(timestamps) and timestamps[index] == as_of:
-            values[index] = value
-            return
+    def put(self, as_of: Timestamp, key: Key, value: Value) -> bool:
+        versions = self._versions.get(key)
+        if versions is None:
+            self._versions[key] = ([as_of], [value])
+            return True
 
-        timestamps.insert(index, as_of)
-        values.insert(index, value)
+        timestamps, values = versions
+        latest_timestamp = timestamps[-1]
+        if as_of == latest_timestamp and value == values[-1]:
+            return False
+        if as_of <= latest_timestamp:
+            raise ValueError(
+                f"timestamp {as_of!r} must be greater than the latest "
+                f"timestamp {latest_timestamp!r} for key {key!r}"
+            )
+        if value == values[-1]:
+            return False
+
+        timestamps.append(as_of)
+        values.append(value)
+        return True
 
     def get(self, as_of: Timestamp, key: Key) -> Value | None:
         versions = self._versions.get(key)

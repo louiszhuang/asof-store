@@ -25,8 +25,12 @@ with store.as_of(20) as snapshot:
 ```
 
 Both `get` methods return `None` when no value exists at or before the
-requested timestamp. Timestamps for a key may be inserted in any order, and
-writing the same key at the same timestamp replaces its value.
+requested timestamp. For each key, writes must use strictly increasing
+timestamps. `put` returns `False` without recording a new version when the
+value equals that key's latest value, or when the exact latest
+`(timestamp, key, value)` is repeated. Otherwise, it records the value and
+returns `True`. Reusing a timestamp with a different value or going back to an
+earlier timestamp raises `ValueError`.
 
 ## SQL storage (optional)
 
@@ -64,6 +68,11 @@ altered if its schema differs. Other Python values are stored with pickle, so
 only use SQL stores with databases you trust, since loading a database
 containing untrusted pickle data can execute code. Call `store.close()` when
 finished to release SQLAlchemy's pooled connections.
+SQL timestamps must use sortable scalar types supported by the database (such
+as integers, strings, dates, datetimes, decimals, and UUIDs); compound JSON and
+arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
+supported because PostgreSQL does not provide ordering comparisons for them.
+SQL stores index `(key, timestamp)` for efficient latest-version lookups.
 
 ## Development
 
