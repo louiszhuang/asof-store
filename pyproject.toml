@@ -1,6 +1,6 @@
 [project]
 name = "asof-store"
-version = "0.1.0"
+version = "0.2.0"
 description = "asof store provides a simple and efficient way to store and retrieve data with versioning support. It allows users to save different versions of their data and access them as needed."
 readme = "README.md"
 authors = [{ name = "Louis Zhuang", email = "yzhuang@outlook.com" }]
@@ -14,16 +14,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-sql-sqlite = [
-    "sqlalchemy>=2.0",
-]
-sql-postgres = [
-    "sqlalchemy>=2.0",
-    "psycopg[binary]>=3.2",
-]
-dev = [
-    "pytest>=8.0",
-]
+sql-sqlite = ["sqlalchemy>=2.1"]
+sql-postgres = ["sqlalchemy>=2.1", "psycopg[binary]>=3.2"]
+zapros = ["zapros>=0.20.0"]
+dev = ["pytest>=8"]
 
 [project.scripts]
 asof-store = "asof_store:main"

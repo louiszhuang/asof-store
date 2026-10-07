@@ -74,6 +74,59 @@ arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
 supported because PostgreSQL does not provide ordering comparisons for them.
 SQL stores index `(key, timestamp)` for efficient latest-version lookups.
 
+## Zapros middleware (optional)
+
+Install the Zapros integration extra:
+
+```sh
+uv add "asof-store[zapros]"
+```
+
+The middleware supports synchronous and asynchronous Zapros clients. In
+`building` mode it forwards requests to the network and records non-empty JSON
+objects from successful (2xx) responses, keyed by the exact URL and request body.
+The version timestamp is the time the response is recorded. In `as_of` mode it
+returns the latest saved JSON response at or before the supplied timezone-aware
+timestamp, without calling the network handler. A missing match raises
+Zapros's `UnhandledRequestError`.
+
+```python
+from datetime import UTC, datetime
+
+from asof_store import AsOfStore
+from asof_store.zapros import ZaprosAsOfMiddleware
+from zapros import Client, StdNetworkHandler
+
+store = AsOfStore.from_memory()
+
+with Client(
+    handler=ZaprosAsOfMiddleware(
+        StdNetworkHandler(),
+        store,
+        mode="building",
+    )
+) as client:
+    client.get("https://api.example.com/items")
+
+with Client(
+    handler=ZaprosAsOfMiddleware(
+        None,
+        store,
+        mode="as_of",
+        as_of=datetime.now(UTC),
+    )
+) as client:
+    response = client.get("https://api.example.com/items")
+    print(response.json)
+```
+
+`RequestKey` is a hashable dictionary with `uri` and `request_body` fields; the
+request body is parsed from JSON (or `None` when absent). The middleware stores
+non-empty JSON objects as response values.
+
+For SQL persistence, create a store with timestamp type `datetime`, key type
+`RequestKey`, and value type `dict`.
+
 ## Development
 
 Install the test dependency and run the suite with pytest:
