@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from asof_store import AsOfStore
 
@@ -35,6 +37,33 @@ class AsOfStoreTests(unittest.TestCase):
             self.store.put(20, "item", "future")
             self.assertEqual(snapshot.get("item"), "original")
             self.assertIsNone(snapshot.get("missing"))
+
+    def test_sqlite_backend_persists_and_supports_as_of_queries(self) -> None:
+        try:
+            with TemporaryDirectory() as directory:
+                sql_uri = f"sqlite:///{Path(directory) / 'store.db'}"
+                store = AsOfStore.from_sql(sql_uri)
+                reopened = None
+                try:
+                    store.put(20, "item", {"value": "later"})
+                    store.put(10, "item", {"value": "earlier"})
+                    store.put(10, "item", {"value": "replacement"})
+
+                    reopened = AsOfStore.from_sql(sql_uri)
+                    self.assertEqual(
+                        reopened.get(15, "item"), {"value": "replacement"}
+                    )
+                    self.assertIsNone(reopened.get(9, "item"))
+                    with reopened.as_of(25) as snapshot:
+                        self.assertEqual(snapshot.get("item"), {"value": "later"})
+                finally:
+                    store.close()
+                    if reopened is not None:
+                        reopened.close()
+        except ImportError as exc:
+            if "SQL storage requires optional dependencies" in str(exc):
+                self.skipTest(str(exc))
+            raise
 
 
 if __name__ == "__main__":

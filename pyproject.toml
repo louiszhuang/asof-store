@@ -13,6 +13,15 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 
+[project.optional-dependencies]
+sql-sqlite = [
+    "sqlalchemy>=2.0",
+]
+sql-postgres = [
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+]
+
 [project.scripts]
 asof-store = "asof_store:main"
 
