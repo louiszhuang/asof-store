@@ -26,8 +26,15 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
         return cls()
 
     @classmethod
-    def from_sql(cls, sql_uri: str) -> AsOfStore[Timestamp, Key, Value]:
-        """Create a SQL-backed store; install the extra matching the database."""
+    def from_sql(
+        cls,
+        sql_uri: str,
+        table_name: str,
+        timestamp_type: type[Timestamp],
+        key_type: type[Key],
+        value_type: type[Value],
+    ) -> AsOfStore[Timestamp, Key, Value]:
+        """Create a SQL-backed store using the provided value types."""
         try:
             from ._sql import SqlBackend
         except ImportError as exc:
@@ -38,7 +45,13 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
             ) from exc
 
         store = cls()
-        store._sql_backend = SqlBackend[Timestamp, Key, Value](sql_uri)
+        store._sql_backend = SqlBackend[Timestamp, Key, Value](
+            sql_uri,
+            table_name,
+            timestamp_type,
+            key_type,
+            value_type,
+        )
         return store
 
     def put(self, as_of: Timestamp, key: Key, value: Value) -> None:

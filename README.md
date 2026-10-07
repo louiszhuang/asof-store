@@ -5,8 +5,8 @@ before a specified timestamp.
 
 ## Install
 
-```python
-python -m pip install asof-store
+```sh
+uv add asof-store
 ```
 
 ## Usage
@@ -38,17 +38,38 @@ python -m pip install "asof-store[sql-sqlite]"
 python -m pip install "asof-store[sql-postgres]"
 ```
 
-SQLite and PostgreSQL URIs are supported through SQLAlchemy:
+Pass the table name and timestamp, key, and value types when creating a
+SQL-backed store:
 
 ```python
-sqlite_store = AsOfStore.from_sql("sqlite:///asof.db")
+from asof_store import AsOfStore
+
+sqlite_store = AsOfStore.from_sql(
+    "sqlite:///asof.db", "price_versions", int, str, dict
+)
 postgres_store = AsOfStore.from_sql(
-    "postgresql+psycopg://user:password@localhost/database"
+    "postgresql+psycopg://user:password@localhost/database",
+    "price_versions",
+    int,
+    str,
+    dict,
 )
 ```
 
-The SQL backend persists keys, timestamps, and values using Python pickle.
-Only use it with databases you trust, since loading a database containing
-untrusted pickle data can execute code. Objects written to the SQL backend
-must be pickleable, and timestamps must support ordering comparisons. Call
-`store.close()` when finished to release SQLAlchemy's pooled connections.
+Native SQL types are used where supported, including JSONB for `dict` and
+`list` on PostgreSQL. Other Python types use pickle. SQL stores validate writes
+against the declared types. SQL-backed `datetime` values must be timezone-aware.
+Use a distinct table name for each type combination; an existing table is not
+altered if its schema differs. Other Python values are stored with pickle, so
+only use SQL stores with databases you trust, since loading a database
+containing untrusted pickle data can execute code. Call `store.close()` when
+finished to release SQLAlchemy's pooled connections.
+
+## Development
+
+Install the test dependency and run the suite with pytest:
+
+```sh
+uv sync --all-packages --all-extras
+uv run pytest
+```

@@ -1,3 +1,3 @@
 # Rules
 
-1. Use latest type checking in python
+1. Use uv to manage project

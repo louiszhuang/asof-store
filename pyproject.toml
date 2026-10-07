@@ -21,6 +21,9 @@ sql-postgres = [
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
 ]
+dev = [
+    "pytest>=8.0",
+]
 
 [project.scripts]
 asof-store = "asof_store:main"
