@@ -1,29 +1,22 @@
-from bisect import bisect_left, bisect_right
+from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
 
-
-class _StoreBackend[Timestamp, Key, Value](Protocol):
-    def put(self, as_of: Timestamp, key: Key, value: Value) -> None: ...
-
-    def get(self, as_of: Timestamp, key: Key) -> Value | None: ...
-
-    def close(self) -> None: ...
+    from ._memory import MemoryBackend
+    from ._sql import SqlBackend
 
 
-class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
-    """An in-memory store for values indexed by key and timestamp."""
-
-    def __init__(self) -> None:
-        self._versions: dict[Key, tuple[list[Timestamp], list[Value]]] = {}
-        self._sql_backend: _StoreBackend[Timestamp, Key, Value] | None = None
+class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value](ABC):
+    """Factory and interface for versioned stores."""
 
     @classmethod
-    def from_memory(cls) -> AsOfStore[Timestamp, Key, Value]:
-        return cls()
+    def from_memory(cls) -> MemoryBackend[Timestamp, Key, Value]:
+        from ._memory import MemoryBackend
+
+        return MemoryBackend[Timestamp, Key, Value]()
 
     @classmethod
     def from_sql(
@@ -33,7 +26,7 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
         timestamp_type: type[Timestamp],
         key_type: type[Key],
         value_type: type[Value],
-    ) -> AsOfStore[Timestamp, Key, Value]:
+    ) -> SqlBackend[Timestamp, Key, Value]:
         """Create a SQL-backed store using the provided value types."""
         try:
             from ._sql import SqlBackend
@@ -44,48 +37,26 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
                 "'asof-store[sql-postgres]' for PostgreSQL"
             ) from exc
 
-        store = cls()
-        store._sql_backend = SqlBackend[Timestamp, Key, Value](
+        return SqlBackend[Timestamp, Key, Value](
             sql_uri,
             table_name,
             timestamp_type,
             key_type,
             value_type,
         )
-        return store
 
+    @abstractmethod
     def put(self, as_of: Timestamp, key: Key, value: Value) -> None:
-        if self._sql_backend is not None:
-            self._sql_backend.put(as_of, key, value)
-            return
+        raise NotImplementedError
 
-        timestamps, values = self._versions.setdefault(key, ([], []))
-        index = bisect_left(timestamps, as_of)
-        if index < len(timestamps) and timestamps[index] == as_of:
-            values[index] = value
-            return
-
-        timestamps.insert(index, as_of)
-        values.insert(index, value)
-
+    @abstractmethod
     def get(self, as_of: Timestamp, key: Key) -> Value | None:
-        if self._sql_backend is not None:
-            return self._sql_backend.get(as_of, key)
+        raise NotImplementedError
 
-        versions = self._versions.get(key)
-        if versions is None:
-            return None
-
-        timestamps, values = versions
-        index = bisect_right(timestamps, as_of) - 1
-        if index < 0:
-            return None
-        return values[index]
-
+    @abstractmethod
     def close(self) -> None:
-        """Release resources held by an optional SQL backend."""
-        if self._sql_backend is not None:
-            self._sql_backend.close()
+        """Release resources held by the store."""
+        raise NotImplementedError
 
     def as_of(self, as_of: Timestamp) -> AsOfView[Timestamp, Key, Value]:
         return AsOfView(self, as_of)

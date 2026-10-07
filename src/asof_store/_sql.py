@@ -29,6 +29,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql.type_api import TypeEngine
 
+from . import AsOfStore
+
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
 
@@ -108,7 +110,9 @@ def _decode(python_type: type[Any], value: Any) -> Any:
     return value
 
 
-class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value]:
+class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
+    AsOfStore[Timestamp, Key, Value]
+):
     def __init__(
         self,
         sql_uri: str,

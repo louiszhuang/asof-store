@@ -26,6 +26,7 @@ def _from_sql(
 
 def test_get_returns_latest_value_at_or_before_timestamp() -> None:
     store = AsOfStore.from_memory()
+    assert type(store).__name__ == "MemoryBackend"
     store.put(20, "item", "later")
     store.put(10, "item", "earlier")
     store.put(30, "item", "latest")
@@ -65,6 +66,7 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
     store = _from_sql("sqlite:///:memory:", "json_versions", int, str, dict)
     text_store = _from_sql("sqlite:///:memory:", "text_versions", int, str, str)
     try:
+        assert type(store).__name__ == "SqlBackend"
         store.put(20, "item", {"value": "later"})
         store.put(10, "item", {"value": "earlier"})
         store.put(10, "item", {"value": "replacement"})
@@ -153,7 +155,7 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
     table_name = f"asof_jsonb_{uuid4().hex}"
     sql_uri = "postgresql://louis@fre.local/louis"
     store = _from_sql(sql_uri, table_name, dict, list, dict)
-    engine = store._sql_backend._engine  # ty: ignore[unresolved-attribute]
+    engine = store._engine  # ty: ignore[unresolved-attribute]
     try:
         key = ["tenant", {"id": 7}]
         expected = {"payload": ["café", 1, True, None, {"nested": ["value"]}]}
@@ -176,16 +178,16 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
         with engine.connect() as connection:
             stored_timestamp, stored_key, stored_value = connection.execute(
                 select(
-                    store._sql_backend._versions.c.timestamp,  # ty: ignore[unresolved-attribute]
-                    store._sql_backend._versions.c.key,  # ty: ignore[unresolved-attribute]
-                    store._sql_backend._versions.c.value,  # ty: ignore[unresolved-attribute]
-                ).where(store._sql_backend._versions.c.timestamp == {"sequence": 1})  # ty: ignore[unresolved-attribute]
+                    store._versions.c.timestamp,  # ty: ignore[unresolved-attribute]
+                    store._versions.c.key,  # ty: ignore[unresolved-attribute]
+                    store._versions.c.value,  # ty: ignore[unresolved-attribute]
+                ).where(store._versions.c.timestamp == {"sequence": 1})  # ty: ignore[unresolved-attribute]
             ).one()
         assert stored_timestamp == {"sequence": 1}
         assert stored_key == key
         assert stored_value == {"version": 1}
     finally:
-        store._sql_backend._versions.drop(engine, checkfirst=True)  # ty: ignore[unresolved-attribute]
+        store._versions.drop(engine, checkfirst=True)  # ty: ignore[unresolved-attribute]
         store.close()
 
 
@@ -203,16 +205,13 @@ def test_postgresql_datetime_timestamp_type() -> None:
     try:
         timestamp_column = next(
             column
-            for column in inspect(store._sql_backend._engine).get_columns(table_name)  # ty: ignore[unresolved-attribute]
+            for column in inspect(store._engine).get_columns(table_name)  # ty: ignore[unresolved-attribute]
             if column["name"] == "timestamp"
         )
         assert timestamp_column["type"].timezone is True
         _assert_datetime_timestamp_behavior(store)
     finally:
-        store._sql_backend._versions.drop(  # ty: ignore[unresolved-attribute]
-            store._sql_backend._engine,  # ty: ignore[unresolved-attribute]
-            checkfirst=True,
-        )
+        store._versions.drop(store._engine, checkfirst=True)  # ty: ignore[unresolved-attribute]
         store.close()
 
 
@@ -231,7 +230,7 @@ def test_sql_store_uses_the_requested_table_name() -> None:
     table_name = "my_asof_versions"
     store = _from_sql("sqlite:///:memory:", table_name, int, str, dict)
     try:
-        assert store._sql_backend._versions.name == table_name  # ty: ignore[unresolved-attribute]
+        assert store._versions.name == table_name  # ty: ignore[unresolved-attribute]
     finally:
         store.close()
 
