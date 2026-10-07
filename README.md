@@ -1,18 +1,29 @@
 # asof-store
 
-A starter Python package with an `asof-store` command-line entry point.
+An in-memory versioned store for retrieving the latest value written at or
+before a specified timestamp.
 
 ## Install
 
-```sh
+```python
 python -m pip install asof-store
 ```
 
-## Run
+## Usage
 
-```sh
-asof-store
+```python
+from asof_store import AsOfStore
+
+store = AsOfStore.from_memory()
+store.put(as_of=10, key="price", value=100)
+store.put(as_of=20, key="price", value=125)
+
+assert store.get(as_of=15, key="price") == 100
+
+with store.as_of(20) as snapshot:
+    assert snapshot.get("price") == 125
 ```
 
-The command currently prints a greeting. The package requires Python 3.14 or
-later.
+Both `get` methods return `None` when no value exists at or before the
+requested timestamp. Timestamps for a key may be inserted in any order, and
+writing the same key at the same timestamp replaces its value.
