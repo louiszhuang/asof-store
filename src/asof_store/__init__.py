@@ -1,6 +1,7 @@
-from abc import ABC, abstractmethod
-from types import TracebackType
 from typing import TYPE_CHECKING
+
+from ._abc import AsOfStoreABC
+from ._view import AsOfView
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
@@ -9,8 +10,8 @@ if TYPE_CHECKING:
     from ._sql import SqlBackend
 
 
-class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value](ABC):
-    """Factory and interface for versioned stores."""
+class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
+    """Factory for versioned store backends."""
 
     @classmethod
     def from_memory(cls) -> MemoryBackend[Timestamp, Key, Value]:
@@ -45,48 +46,9 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value](ABC):
             value_type,
         )
 
-    @abstractmethod
-    def put(self, as_of: Timestamp, key: Key, value: Value) -> bool:
-        """Record a newer value, returning whether a new version was stored."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def get(self, as_of: Timestamp, key: Key) -> Value | None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def close(self) -> None:
-        """Release resources held by the store."""
-        raise NotImplementedError
-
-    def as_of(self, as_of: Timestamp) -> AsOfView[Timestamp, Key, Value]:
-        return AsOfView(self, as_of)
-
-
-class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
-    """A view of an AsOfStore queried at one fixed timestamp."""
-
-    def __init__(self, store: AsOfStore[Timestamp, Key, Value], as_of: Timestamp):
-        self._store = store
-        self._as_of = as_of
-
-    def get(self, key: Key) -> Value | None:
-        return self._store.get(self._as_of, key)
-
-    def __enter__(self) -> AsOfView[Timestamp, Key, Value]:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        return None
-
 
 def main() -> None:
     print("Hello from asof-store!")
 
 
-__all__ = ["AsOfStore", "AsOfView", "main"]
+__all__ = ["AsOfStore", "AsOfStoreABC", "AsOfView", "main"]

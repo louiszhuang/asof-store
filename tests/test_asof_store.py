@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from asof_store import AsOfStore
+from asof_store import AsOfStore, AsOfStoreABC, AsOfView
 
 
 def _from_sql(
@@ -13,7 +13,7 @@ def _from_sql(
     timestamp_type: type,
     key_type: type,
     value_type: type,
-) -> AsOfStore:
+) -> AsOfStoreABC:
     try:
         return AsOfStore.from_sql(
             sql_uri, table_name, timestamp_type, key_type, value_type
@@ -27,6 +27,7 @@ def _from_sql(
 def test_get_returns_latest_value_at_or_before_timestamp() -> None:
     store = AsOfStore.from_memory()
     assert type(store).__name__ == "MemoryBackend"
+    assert isinstance(store, AsOfStoreABC)
     assert store.put(10, "item", "earlier") is True
     assert store.put(20, "item", "later") is True
     assert store.put(30, "item", "latest") is True
@@ -74,6 +75,7 @@ def test_as_of_context_uses_fixed_timestamp() -> None:
     store.put(10, "item", "original")
 
     with store.as_of(15) as snapshot:
+        assert isinstance(snapshot, AsOfView)
         store.put(20, "item", "future")
         assert snapshot.get("item") == "original"
         assert snapshot.get("missing") is None
@@ -84,6 +86,7 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
     text_store = _from_sql("sqlite:///:memory:", "text_versions", int, str, str)
     try:
         assert type(store).__name__ == "SqlBackend"
+        assert isinstance(store, AsOfStoreABC)
         assert store.put(10, "item", {"value": "earlier"}) is True
         assert store.put(20, "item", {"value": "later"}) is True
         assert store.put(30, "item", {"value": "later"}) is False
@@ -110,7 +113,7 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
         text_store.close()
 
 
-def _assert_datetime_timestamp_behavior(store: AsOfStore) -> None:
+def _assert_datetime_timestamp_behavior(store: AsOfStoreABC) -> None:
     initial = datetime(2024, 1, 1, 10, tzinfo=timezone(timedelta(hours=2)))
     equivalent_instant = datetime(2024, 1, 1, 6, tzinfo=timezone(-timedelta(hours=2)))
     later = datetime(2024, 1, 1, 9, tzinfo=UTC)
@@ -290,7 +293,7 @@ _SORTABLE_TIMESTAMP_CASES = [
 
 
 def _assert_timestamp_type_ordering(
-    store: AsOfStore, earlier: object, later: object
+    store: AsOfStoreABC, earlier: object, later: object
 ) -> None:
     assert store.put(earlier, "item", "first") is True
     assert store.put(later, "item", "second") is True
