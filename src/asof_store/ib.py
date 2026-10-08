@@ -1,32 +1,30 @@
-from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
 try:
+    from pydantic import TypeAdapter
     from zapros import AsyncClient, Client, RequestContext
 except ImportError as exc:
     raise ImportError(
-        "The IB integration requires Zapros; install the 'zapros' extra"
+        "The IB integration requires Pydantic and Zapros; install the 'scraper' extra"
     ) from exc
+
+from .ib_models import (
+    ExchangeResponse,
+    Instrument,
+    InstrumentSummaryItem,
+    InstrumentSummaryRequest,
+    ProductsByFiltersRequest,
+    ProductsResponse,
+)
+
+_SUMMARY_ADAPTER = TypeAdapter(list[InstrumentSummaryItem])
 
 _BASE_URL = "https://www.interactivebrokers.co.uk/webrest"
 _EXCHANGES_URL = f"{_BASE_URL}/exchanges/"
 _SUMMARY_URL = f"{_BASE_URL}/search/product-types/summary"
 _PRODUCTS_URL = f"{_BASE_URL}/search/products-by-filters"
-_PRODUCT_TYPES = (
-    "CMDTY",
-    "FOP",
-    "IOPT",
-    "IND",
-    "FUND",
-    "FUT",
-    "CASH",
-    "OPT",
-    "ETF",
-    "WAR",
-    "BOND",
-    "STK",
-)
 
 
 @contextmanager
@@ -103,19 +101,13 @@ def _validate_page_size(page_size: int) -> None:
         raise ValueError("page_size must be 100, 200, 300, 400, or 500")
 
 
-def _product_totals(summary: list[dict[str, Any]]) -> dict[str, int]:
+def _product_totals(
+    summary: list[InstrumentSummaryItem],
+) -> dict[str, int]:
     totals: dict[str, int] = {}
     for item in summary:
-        product_type = item.get("productType")
-        total_count = item.get("totalCount")
-        if (
-            not isinstance(product_type, str)
-            or not product_type
-            or not isinstance(total_count, int)
-            or isinstance(total_count, bool)
-            or total_count < 0
-        ):
-            raise ValueError(f"Invalid IB instrument summary entry: {item!r}")
+        product_type = item.product_type
+        total_count = item.total_count
         if product_type in totals:
             raise ValueError(f"Duplicate IB instrument summary: {product_type}")
         totals[product_type] = total_count
@@ -123,48 +115,25 @@ def _product_totals(summary: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def _validated_products(
-    products: list[Any],
+    products: list[Instrument],
     *,
     product_type: str,
     page_number: int,
     expected_count: int,
-) -> list[dict[str, Any]]:
+) -> list[Instrument]:
     if len(products) != expected_count:
         raise ValueError(
             f"Unexpected product count for {product_type} page "
             f"{page_number}: expected {expected_count}, received {len(products)}"
         )
-    if any(not isinstance(product, dict) for product in products):
-        raise TypeError(
-            f"IB products must be objects for {product_type} page {page_number}"
-        )
     return products
-
-
-def _request_body(
-    domain: str,
-    page_number: int,
-    page_size: int,
-    product_types: tuple[str, ...] | list[str],
-) -> dict[str, Any]:
-    return {
-        "domain": domain,
-        "newProduct": "all",
-        "pageNumber": page_number,
-        "pageSize": page_size,
-        "productCountry": [],
-        "productSymbol": "",
-        "productType": list(product_types),
-        "sortDirection": "asc",
-        "sortField": "symbol",
-    }
 
 
 def get_exchanges(
     client: Any | None = None,
     *,
     timeout: float = 30,
-) -> dict[str, Any]:
+) -> ExchangeResponse:
     """Return IB's exchange catalogue."""
     _validate_timeout(timeout)
     with _using_client(client) as active_client:
@@ -175,16 +144,14 @@ def get_exchanges(
             payload=None,
             timeout=timeout,
         )
-    if not isinstance(result, dict) or not isinstance(result.get("exchanges"), list):
-        raise TypeError("IB exchanges response must contain an exchanges list")
-    return result
+    return ExchangeResponse.model_validate(result)
 
 
 async def get_exchanges_async(
     client: Any | None = None,
     *,
     timeout: float = 30,
-) -> dict[str, Any]:
+) -> ExchangeResponse:
     """Asynchronously return IB's exchange catalogue."""
     _validate_timeout(timeout)
     async with _using_async_client(client) as active_client:
@@ -195,9 +162,7 @@ async def get_exchanges_async(
             payload=None,
             timeout=timeout,
         )
-    if not isinstance(result, dict) or not isinstance(result.get("exchanges"), list):
-        raise TypeError("IB exchanges response must contain an exchanges list")
-    return result
+    return ExchangeResponse.model_validate(result)
 
 
 def get_instrument_summary(
@@ -205,10 +170,10 @@ def get_instrument_summary(
     *,
     domain: str = "uk",
     timeout: float = 30,
-) -> list[dict[str, Any]]:
+) -> list[InstrumentSummaryItem]:
     """Return the instrument counts by IB product type."""
     _validate_timeout(timeout)
-    payload = _request_body(domain, 1, 100, _PRODUCT_TYPES)
+    payload = InstrumentSummaryRequest(domain=domain).model_dump(by_alias=True)
     with _using_client(client) as active_client:
         result = _request_json(
             active_client,
@@ -217,11 +182,7 @@ def get_instrument_summary(
             payload=payload,
             timeout=timeout,
         )
-    if not isinstance(result, list) or any(
-        not isinstance(item, dict) for item in result
-    ):
-        raise TypeError("IB instrument summary response must be a list of objects")
-    return result
+    return _SUMMARY_ADAPTER.validate_python(result)
 
 
 async def get_instrument_summary_async(
@@ -229,10 +190,10 @@ async def get_instrument_summary_async(
     *,
     domain: str = "uk",
     timeout: float = 30,
-) -> list[dict[str, Any]]:
+) -> list[InstrumentSummaryItem]:
     """Asynchronously return instrument counts by IB product type."""
     _validate_timeout(timeout)
-    payload = _request_body(domain, 1, 100, _PRODUCT_TYPES)
+    payload = InstrumentSummaryRequest(domain=domain).model_dump(by_alias=True)
     async with _using_async_client(client) as active_client:
         result = await _request_json_async(
             active_client,
@@ -241,11 +202,7 @@ async def get_instrument_summary_async(
             payload=payload,
             timeout=timeout,
         )
-    if not isinstance(result, list) or any(
-        not isinstance(item, dict) for item in result
-    ):
-        raise TypeError("IB instrument summary response must be a list of objects")
-    return result
+    return _SUMMARY_ADAPTER.validate_python(result)
 
 
 def get_products_by_filters(
@@ -256,7 +213,7 @@ def get_products_by_filters(
     page_size: int = 500,
     domain: str = "uk",
     timeout: float = 30,
-) -> dict[str, Any]:
+) -> ProductsResponse:
     """Return one page of IB products for a product type."""
     if not product_type:
         raise ValueError("product_type must not be empty")
@@ -265,7 +222,12 @@ def get_products_by_filters(
     _validate_page_size(page_size)
     _validate_timeout(timeout)
 
-    payload = _request_body(domain, page_number, page_size, [product_type])
+    payload = ProductsByFiltersRequest(
+        domain=domain,
+        page_number=page_number,
+        page_size=page_size,
+        product_type=[product_type],
+    ).model_dump(by_alias=True)
     with _using_client(client) as active_client:
         result = _request_json(
             active_client,
@@ -274,9 +236,7 @@ def get_products_by_filters(
             payload=payload,
             timeout=timeout,
         )
-    if not isinstance(result, dict) or not isinstance(result.get("products"), list):
-        raise TypeError("IB products response must contain a products list")
-    return result
+    return ProductsResponse.model_validate(result)
 
 
 async def get_products_by_filters_async(
@@ -287,7 +247,7 @@ async def get_products_by_filters_async(
     page_size: int = 500,
     domain: str = "uk",
     timeout: float = 30,
-) -> dict[str, Any]:
+) -> ProductsResponse:
     """Asynchronously return one page of IB products for a product type."""
     if not product_type:
         raise ValueError("product_type must not be empty")
@@ -296,7 +256,12 @@ async def get_products_by_filters_async(
     _validate_page_size(page_size)
     _validate_timeout(timeout)
 
-    payload = _request_body(domain, page_number, page_size, [product_type])
+    payload = ProductsByFiltersRequest(
+        domain=domain,
+        page_number=page_number,
+        page_size=page_size,
+        product_type=[product_type],
+    ).model_dump(by_alias=True)
     async with _using_async_client(client) as active_client:
         result = await _request_json_async(
             active_client,
@@ -305,9 +270,7 @@ async def get_products_by_filters_async(
             payload=payload,
             timeout=timeout,
         )
-    if not isinstance(result, dict) or not isinstance(result.get("products"), list):
-        raise TypeError("IB products response must contain a products list")
-    return result
+    return ProductsResponse.model_validate(result)
 
 
 def scrape_instruments(
@@ -316,7 +279,7 @@ def scrape_instruments(
     domain: str = "uk",
     page_size: int = 500,
     timeout: float = 30,
-) -> Iterator[dict[str, Any]]:
+) -> Generator[Instrument]:
     """Yield instruments, fetching every page reported by the type summary."""
     _validate_page_size(page_size)
     _validate_timeout(timeout)
@@ -343,7 +306,7 @@ def scrape_instruments(
                     total_count - (page_number - 1) * page_size,
                 )
                 yield from _validated_products(
-                    page["products"],
+                    page.products,
                     product_type=product_type,
                     page_number=page_number,
                     expected_count=expected_count,
@@ -356,7 +319,7 @@ async def scrape_instruments_async(
     domain: str = "uk",
     page_size: int = 500,
     timeout: float = 30,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[Instrument]:
     """Asynchronously yield every instrument reported by the type summary."""
     _validate_page_size(page_size)
     _validate_timeout(timeout)
@@ -383,7 +346,7 @@ async def scrape_instruments_async(
                     total_count - (page_number - 1) * page_size,
                 )
                 for product in _validated_products(
-                    page["products"],
+                    page.products,
                     product_type=product_type,
                     page_number=page_number,
                     expected_count=expected_count,

@@ -79,7 +79,7 @@ SQL stores index `(key, timestamp)` for efficient latest-version lookups.
 Install the Zapros extra to query the Interactive Brokers UK web API:
 
 ```sh
-uv add "asof-store[zapros]"
+uv add "asof-store[scraper]"
 ```
 
 Functions in `asof_store.ib` create and close a Zapros client when one is not
@@ -89,6 +89,12 @@ fetches product counts by type. `get_products_by_filters` fetches one page, and
 `scrape_instruments` fetches every reported page and yields instruments.
 Async equivalents have an `_async` suffix; `scrape_instruments_async` is an
 async iterator.
+
+The API returns Pydantic models: `ExchangeResponse`, `InstrumentSummaryItem`,
+`ProductsResponse`, and `Instrument`. Request models
+`InstrumentSummaryRequest` and `ProductsByFiltersRequest` serialize field names
+to the format expected by IB. Instrument models allow additional IB fields so
+new or product-specific response fields are retained.
 
 ```python
 from asof_store.ib import get_exchanges, scrape_instruments

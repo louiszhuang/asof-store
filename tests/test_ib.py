@@ -16,6 +16,14 @@ from asof_store.ib import (
     scrape_instruments,
     scrape_instruments_async,
 )
+from asof_store.ib_models import (
+    ExchangeResponse,
+    Instrument,
+    InstrumentSummaryItem,
+    InstrumentSummaryRequest,
+    ProductsByFiltersRequest,
+    ProductsResponse,
+)
 
 
 class FakeResponse:
@@ -65,16 +73,26 @@ class AsyncFakeClient:
 
 
 def test_get_exchanges_calls_ib_endpoint_directly() -> None:
-    body = {"exchanges": [{"id": "NYSE"}], "productCount": 1}
+    body = {
+        "exchanges": [],
+        "productTypeCount": {},
+        "productCount": 1,
+    }
     client = FakeClient(lambda method, url, payload: FakeResponse(body))
 
-    assert get_exchanges(client, timeout=12) == body
+    exchanges = get_exchanges(client, timeout=12)
+    assert isinstance(exchanges, ExchangeResponse)
+    assert exchanges.product_count == 1
     assert client.requests == [("GET", _EXCHANGES_URL, {"timeouts": {"total": 12}})]
 
 
 def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
     async def exercise() -> None:
-        exchanges = {"exchanges": [{"id": "NYSE"}]}
+        exchanges = {
+            "exchanges": [],
+            "productTypeCount": {},
+            "productCount": 0,
+        }
         summary = [{"productType": "STK", "totalCount": 1}]
         products = {"products": [{"symbol": "ABC"}]}
         client = AsyncFakeClient(
@@ -87,17 +105,19 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
             )
         )
 
-        assert await get_exchanges_async(client, timeout=12) == exchanges
-        assert await get_instrument_summary_async(client) == summary
-        assert (
-            await get_products_by_filters_async(
-                "STK",
-                client,
-                page_number=2,
-                page_size=500,
-            )
-            == products
+        exchange_result = await get_exchanges_async(client, timeout=12)
+        summary_result = await get_instrument_summary_async(client)
+        product_result = await get_products_by_filters_async(
+            "STK",
+            client,
+            page_number=2,
+            page_size=500,
         )
+        assert isinstance(exchange_result, ExchangeResponse)
+        assert isinstance(summary_result[0], InstrumentSummaryItem)
+        assert isinstance(product_result, ProductsResponse)
+        assert product_result.products[0].symbol == "ABC"
+        assert exchange_result.product_count == 0
         assert [request[1] for request in client.requests] == [
             _EXCHANGES_URL,
             _SUMMARY_URL,
@@ -117,17 +137,17 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         )
     )
 
-    assert get_instrument_summary(client) == summary
-    assert (
-        get_products_by_filters(
-            "STK",
-            client,
-            page_number=2,
-            page_size=500,
-            domain="uk",
-        )
-        == products
+    summary_result = get_instrument_summary(client)
+    product_result = get_products_by_filters(
+        "STK",
+        client,
+        page_number=2,
+        page_size=500,
+        domain="uk",
     )
+    assert summary_result == [InstrumentSummaryItem.model_validate(summary[0])]
+    assert isinstance(product_result, ProductsResponse)
+    assert product_result.products[0].symbol == "ABC"
     assert client.requests[0][1] == _SUMMARY_URL
     summary_payload = client.requests[0][2]["payload"]
     assert summary_payload["pageSize"] == 100
@@ -191,10 +211,13 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
     results = list(scrape_instruments(client, page_size=100))
 
     assert len(results) == 102
-    assert results[0] == {"type": "STK", "page": 1, "index": 0}
-    assert results[99] == {"type": "STK", "page": 1, "index": 99}
-    assert results[100] == {"type": "STK", "page": 2, "index": 0}
-    assert results[-1] == {"type": "BOND", "page": 1, "index": 0}
+    assert isinstance(results[0], Instrument)
+    assert results[0].product_type == "STK"
+    assert results[0].page == 1
+    assert results[0].index == 0
+    assert results[99].index == 99
+    assert results[100].page == 2
+    assert results[-1].product_type == "BOND"
     assert len(client.requests) == 4
 
 
@@ -234,10 +257,13 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
         ]
 
         assert len(products) == 102
-        assert products[0] == {"type": "STK", "page": 1, "index": 0}
-        assert products[99] == {"type": "STK", "page": 1, "index": 99}
-        assert products[100] == {"type": "STK", "page": 2, "index": 0}
-        assert products[-1] == {"type": "BOND", "page": 1, "index": 0}
+        assert isinstance(products[0], Instrument)
+        assert products[0].product_type == "STK"
+        assert products[0].page == 1
+        assert products[0].index == 0
+        assert products[99].index == 99
+        assert products[100].page == 2
+        assert products[-1].product_type == "BOND"
         assert len(client.requests) == 4
 
     asyncio.run(exercise())
@@ -264,3 +290,75 @@ def test_get_products_rejects_invalid_pagination(
             page_number=page_number,
             page_size=page_size,
         )
+
+
+def test_products_request_model_serializes_ib_api_names() -> None:
+    request = ProductsByFiltersRequest(
+        domain="uk",
+        page_number=2,
+        page_size=200,
+        product_type=["STK"],
+    )
+
+    assert request.model_dump(by_alias=True) == {
+        "domain": "uk",
+        "newProduct": "all",
+        "pageNumber": 2,
+        "pageSize": 200,
+        "productCountry": [],
+        "productSymbol": "",
+        "productType": ["STK"],
+        "sortDirection": "asc",
+        "sortField": "symbol",
+    }
+
+
+def test_products_request_model_rejects_unsupported_page_size() -> None:
+    with pytest.raises(ValueError):
+        ProductsByFiltersRequest(product_type=["STK"], page_size=150)
+
+
+@pytest.mark.parametrize(
+    "summary_item",
+    [
+        {"productType": "STK", "totalCount": True},
+        {"productType": "STK", "totalCount": -1},
+    ],
+)
+def test_instrument_summary_model_rejects_invalid_counts(
+    summary_item: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError):
+        InstrumentSummaryItem.model_validate(summary_item)
+
+
+def test_instrument_summary_request_contains_supported_product_types() -> None:
+    request = InstrumentSummaryRequest()
+
+    assert request.model_dump(by_alias=True)["productType"] == [
+        "CMDTY",
+        "FOP",
+        "IOPT",
+        "IND",
+        "FUND",
+        "FUT",
+        "CASH",
+        "OPT",
+        "ETF",
+        "WAR",
+        "BOND",
+        "STK",
+    ]
+
+
+def test_instrument_model_preserves_unmodeled_ib_fields() -> None:
+    instrument = Instrument.model_validate(
+        {"conid": 123, "symbol": "ABC", "vendorField": {"extra": True}}
+    )
+
+    assert instrument.conid == 123
+    assert instrument.model_dump(by_alias=True, exclude_unset=True) == {
+        "conid": 123,
+        "symbol": "ABC",
+        "vendorField": {"extra": True},
+    }

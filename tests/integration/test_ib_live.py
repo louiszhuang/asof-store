@@ -1,7 +1,7 @@
 import asyncio
+import logging
 import os
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
 
 import pytest
 
@@ -17,6 +17,12 @@ from asof_store.ib import (
     scrape_instruments,
     scrape_instruments_async,
 )
+from asof_store.ib_models import (
+    ExchangeResponse,
+    Instrument,
+    ProductsResponse,
+    product_name2id,
+)
 
 pytestmark = [
     pytest.mark.integration,
@@ -29,73 +35,76 @@ pytestmark = [
 _TIMEOUT = 60
 _PAGE_SIZE = 100
 
+logger = logging.getLogger(__name__)
 
-def _assert_exchange_response(response: dict[str, Any]) -> None:
-    exchanges = response["exchanges"]
+
+def _assert_exchange_response(response: ExchangeResponse) -> None:
+    exchanges = response.exchanges
+    product_count = response.product_count
+    product_type_count = response.product_type_count
+
+    # consistent data
+    assert product_count == len(exchanges)
+    assert product_count == len({(e.id, e.country) for e in exchanges})
+    assert {e.id for e in exchanges} == {
+        p for _, pc in product_type_count.items() for p in pc
+    }
+
+    # must not empty
+    for p in product_type_count:
+        if p not in product_name2id:
+            logger.warning(
+                f"Product type {p} is in product_type_count but not in product_name2id"
+            )
     assert exchanges
-    assert all(
-        isinstance(exchange, dict)
-        and isinstance(exchange.get("id"), str)
-        and isinstance(exchange.get("name"), str)
-        for exchange in exchanges
-    )
-
-
-def _first_product_type(
-    summary: list[dict[str, Any]],
-) -> tuple[str, int]:
-    for item in summary:
-        product_type = item.get("productType")
-        total_count = item.get("totalCount")
-        assert isinstance(product_type, str) and product_type
-        assert isinstance(total_count, int) and not isinstance(total_count, bool)
-        assert total_count >= 0
-        if total_count:
-            return product_type, total_count
-    pytest.fail("IB returned no products in its instrument summary")
 
 
 def _assert_products(
-    response: dict[str, Any],
+    response: ProductsResponse,
     *,
     total_count: int,
 ) -> None:
-    products = response["products"]
+    products = response.products
     assert len(products) == min(_PAGE_SIZE, total_count)
-    assert all(isinstance(product, dict) for product in products)
+    assert all(isinstance(product, Instrument) for product in products)
 
 
 def test_live_sync_ib_endpoints() -> None:
-    _assert_exchange_response(get_exchanges(timeout=_TIMEOUT))
+    exchanges = get_exchanges(timeout=_TIMEOUT)
+    _assert_exchange_response(exchanges)
 
     summary = get_instrument_summary(timeout=_TIMEOUT)
-    product_type, total_count = _first_product_type(summary)
-    products = get_products_by_filters(
-        product_type,
-        page_size=_PAGE_SIZE,
-        timeout=_TIMEOUT,
-    )
-    _assert_products(products, total_count=total_count)
+    assert len(summary) > 0
+    for si in summary:
+        products = get_products_by_filters(
+            si.product_type,
+            page_size=_PAGE_SIZE,
+            timeout=_TIMEOUT,
+        )
+        _assert_products(products, total_count=si.total_count)
+        break
 
 
 def test_live_async_ib_endpoints() -> None:
     async def exercise() -> None:
-        _assert_exchange_response(await get_exchanges_async(timeout=_TIMEOUT))
+        exchanges = await get_exchanges_async(timeout=_TIMEOUT)
+        _assert_exchange_response(exchanges)
 
         summary = await get_instrument_summary_async(timeout=_TIMEOUT)
-        product_type, total_count = _first_product_type(summary)
-        products = await get_products_by_filters_async(
-            product_type,
-            page_size=_PAGE_SIZE,
-            timeout=_TIMEOUT,
-        )
-        _assert_products(products, total_count=total_count)
+        for si in summary:
+            products = await get_products_by_filters_async(
+                si.product_type,
+                page_size=_PAGE_SIZE,
+                timeout=_TIMEOUT,
+            )
+            _assert_products(products, total_count=si.total_count)
+            break
 
     asyncio.run(exercise())
 
 
 def test_live_sync_scraper_yields_instruments() -> None:
-    instruments: Iterator[dict[str, Any]] = scrape_instruments(
+    instruments: Iterator[Instrument] = scrape_instruments(
         page_size=_PAGE_SIZE,
         timeout=_TIMEOUT,
     )
@@ -104,13 +113,13 @@ def test_live_sync_scraper_yields_instruments() -> None:
     finally:
         instruments.close()
 
-    assert isinstance(instrument, dict)
-    assert instrument
+    assert isinstance(instrument, Instrument)
+    assert instrument.model_dump(exclude_unset=True)
 
 
 def test_live_async_scraper_yields_instruments() -> None:
     async def exercise() -> None:
-        instruments: AsyncIterator[dict[str, Any]] = scrape_instruments_async(
+        instruments: AsyncIterator[Instrument] = scrape_instruments_async(
             page_size=_PAGE_SIZE,
             timeout=_TIMEOUT,
         )
@@ -119,7 +128,7 @@ def test_live_async_scraper_yields_instruments() -> None:
         finally:
             await instruments.aclose()
 
-        assert isinstance(instrument, dict)
-        assert instrument
+        assert isinstance(instrument, Instrument)
+        assert instrument.model_dump(exclude_unset=True)
 
     asyncio.run(exercise())

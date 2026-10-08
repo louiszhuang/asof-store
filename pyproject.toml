@@ -16,7 +16,7 @@ classifiers = [
 [project.optional-dependencies]
 sql-sqlite = ["sqlalchemy>=2.1"]
 sql-postgres = ["sqlalchemy>=2.1", "psycopg[binary]>=3.3"]
-zapros = ["zapros>=0.20.0"]
+scraper = ["pydantic>=2.0", "zapros>=0.20.0"]
 dev = ["pytest>=9"]
 
 [project.scripts]
