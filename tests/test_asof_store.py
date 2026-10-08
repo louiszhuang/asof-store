@@ -191,9 +191,10 @@ def test_json_type_uses_postgresql_jsonb() -> None:
         Column("timestamp", _sql_type(dict)),
         Column("key", _sql_type(list)),
         Column("value", _sql_type(dict)),
+        Column("tuple_value", _sql_type(tuple)),
     )
     ddl = str(CreateTable(table).compile(dialect=postgresql_dialect()))
-    assert ddl.count("JSONB") == 3
+    assert ddl.count("JSONB") == 4
 
 
 def test_pydantic_models_use_json_sql_type_and_round_trip_on_sqlite() -> None:
@@ -232,6 +233,26 @@ def test_sqlite_json_values_round_trip(value_type: type, value: dict | list) -> 
     try:
         store.put(1, "json", value)
         assert store.get(1, "json") == value
+    finally:
+        store.close()
+
+
+def test_sqlite_tuple_values_and_keys_round_trip_as_json() -> None:
+    from sqlalchemy import inspect
+
+    store = _from_sql("sqlite:///:memory:", "tuple_values", int, tuple, tuple)
+    try:
+        key = ("tenant", "item")
+        value = ("first", "second")
+        assert store.put(1, key, value) is True
+        assert store.get(1, key) == value
+
+        column_types = {
+            column["name"]: str(column["type"]).upper()
+            for column in inspect(store._engine).get_columns("tuple_values")
+        }
+        assert column_types["key"] == "JSON"
+        assert column_types["value"] == "JSON"
     finally:
         store.close()
 

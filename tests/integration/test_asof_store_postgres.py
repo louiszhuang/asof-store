@@ -111,6 +111,32 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
         store.close()
 
 
+def test_postgresql_tuples_round_trip_as_jsonb_arrays() -> None:
+    table_name = f"asof_tuple_{uuid4().hex}"
+    store = AsOfStore.from_sql(_POSTGRES_URI, table_name, int, tuple, tuple)
+    try:
+        key = ("tenant", "item")
+        value = ("first", "second")
+        assert store.put(1, key, value) is True
+        assert store.get(1, key) == value
+
+        column_types = {
+            column["name"]: str(column["type"]).upper()
+            for column in inspect(store._engine).get_columns(table_name)
+        }
+        assert column_types["key"] == "JSONB"
+        assert column_types["value"] == "JSONB"
+        with store._engine.connect() as connection:
+            stored_key, stored_value = connection.execute(
+                select(store._versions.c.key, store._versions.c.value)
+            ).one()
+        assert stored_key == ["tenant", "item"]
+        assert stored_value == ["first", "second"]
+    finally:
+        store._versions.drop(store._engine, checkfirst=True)
+        store.close()
+
+
 def test_postgresql_pydantic_models_round_trip_as_jsonb() -> None:
     pytest.importorskip("pydantic")
     from pydantic import BaseModel

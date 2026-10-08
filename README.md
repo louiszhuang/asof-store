@@ -61,11 +61,12 @@ postgres_store = AsOfStore.from_sql(
 ```
 
 Native SQL types are used where supported, including JSONB for `dict`, `list`,
-and Pydantic `BaseModel` subclasses on PostgreSQL (JSON on SQLite). Pydantic
-models are serialized with `model_dump(mode="json", exclude_unset=True)` and
-restored to their declared model type when read. Other Python types use pickle.
-SQL stores validate writes against the declared types. SQL-backed `datetime`
-values must be timezone-aware.
+`tuple`, and Pydantic `BaseModel` subclasses on PostgreSQL (JSON on SQLite).
+Tuples are stored as JSON arrays and restored as tuples. Pydantic models are
+serialized with `model_dump(mode="json", exclude_unset=True)` and restored to
+their declared model type when read. Other Python types use pickle. SQL stores
+validate writes against the declared types. SQL-backed `datetime` values must
+be timezone-aware.
 Use a distinct table name for each type combination; an existing table is not
 altered if its schema differs. Other Python values are stored with pickle, so
 only use SQL stores with databases you trust, since loading a database
