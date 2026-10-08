@@ -198,6 +198,8 @@ def test_cli_wires_filters_progress_and_closes_store(
             "STK",
             "--start-page-number",
             "3",
+            "--end-page-number",
+            "7",
             "--product-country",
             "US",
             "--new-product",
@@ -213,6 +215,7 @@ def test_cli_wires_filters_progress_and_closes_store(
     assert created == [("sqlite:///:memory:", "instruments", datetime, int, Instrument)]
     assert captured["product_type"] == ["STK"]
     assert captured["start_page_number"] == 3
+    assert captured["end_page_number"] == 7
     assert captured["product_country"] == ["US"]
     assert captured["new_product"] == "T"
     assert captured["print_new"] is True
@@ -252,12 +255,25 @@ def test_cli_rejects_nonpositive_progress_interval() -> None:
                 "--product-type",
                 "BOND",
             ],
-            "exactly one --product-type",
+            "page number limits require exactly one --product-type",
         ),
-        (["--start-page-number", "2"], "exactly one --product-type"),
+        (["--start-page-number", "2"], "page number limits require exactly one"),
+        (["--end-page-number", "2"], "page number limits require exactly one"),
+        (
+            [
+                "--start-page-number",
+                "3",
+                "--end-page-number",
+                "2",
+                "--product-type",
+                "STK",
+            ],
+            "end-page-number must be at least --start-page-number",
+        ),
+        (["--end-page-number", "0", "--product-type", "STK"], "--end-page-number"),
     ],
 )
-def test_cli_validates_start_page_number(
+def test_cli_validates_page_number_limits(
     extra_args: list[str],
     message: str,
 ) -> None:

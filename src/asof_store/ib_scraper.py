@@ -159,6 +159,7 @@ def scrape_and_store_instruments(
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
     start_page_number: int = 1,
+    end_page_number: int | None = None,
     timeout: float = 30,
     print_new: bool = False,
     print_changes: bool = False,
@@ -177,6 +178,7 @@ def scrape_and_store_instruments(
         product_country=product_country,
         new_product=new_product,
         start_page_number=start_page_number,
+        end_page_number=end_page_number,
         timeout=timeout,
     )
     for instrument in instruments:
@@ -202,6 +204,7 @@ async def async_scrape_and_store_instruments(
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
     start_page_number: int = 1,
+    end_page_number: int | None = None,
     timeout: float = 30,
     print_new: bool = False,
     print_changes: bool = False,
@@ -220,6 +223,7 @@ async def async_scrape_and_store_instruments(
         product_country=product_country,
         new_product=new_product,
         start_page_number=start_page_number,
+        end_page_number=end_page_number,
         timeout=timeout,
     )
     async for instrument in instruments:
@@ -319,7 +323,12 @@ def _build_parser() -> argparse.ArgumentParser:
     instruments_parser.add_argument(
         "--start-page-number",
         type=int,
-        help="start at this page (requires exactly one --product-type)",
+        help="start at this page (page limits require exactly one --product-type)",
+    )
+    instruments_parser.add_argument(
+        "--end-page-number",
+        type=int,
+        help="inclusive last page to fetch (requires exactly one --product-type)",
     )
     instruments_parser.add_argument(
         "--new-product",
@@ -342,11 +351,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.progress_every < 1:
         raise ValueError("--progress-every must be at least 1")
-    if args.command == "scrape-instruments" and args.start_page_number is not None:
-        if args.start_page_number < 1:
+    if args.command == "scrape-instruments":
+        if args.start_page_number is not None and args.start_page_number < 1:
             raise ValueError("--start-page-number must be at least 1")
-        if args.product_type is None or len(args.product_type) != 1:
-            raise ValueError("--start-page-number requires exactly one --product-type")
+        if args.end_page_number is not None and args.end_page_number < 1:
+            raise ValueError("--end-page-number must be at least 1")
+        if (
+            args.start_page_number is not None
+            or args.end_page_number is not None
+        ) and (args.product_type is None or len(args.product_type) != 1):
+            raise ValueError("page number limits require exactly one --product-type")
+        if (
+            args.end_page_number is not None
+            and args.end_page_number < (args.start_page_number or 1)
+        ):
+            raise ValueError(
+                "--end-page-number must be at least --start-page-number"
+            )
 
     is_instruments = args.command == "scrape-instruments"
     key_type = int if is_instruments else tuple
@@ -382,6 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 start_page_number=(
                     1 if args.start_page_number is None else args.start_page_number
                 ),
+                end_page_number=args.end_page_number,
                 timeout=args.timeout,
                 print_new=args.print_new,
                 print_changes=args.print_changes,

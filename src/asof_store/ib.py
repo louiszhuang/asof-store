@@ -336,14 +336,21 @@ def scrape_instruments(
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
     start_page_number: int = 1,
+    end_page_number: int | None = None,
     timeout: float = 30,
 ) -> Generator[Instrument]:
     """Yield instruments, optionally filtered by product type and country."""
     if start_page_number < 1:
         raise ValueError("start_page_number must be at least 1")
-    if start_page_number != 1 and (product_type is None or len(product_type) != 1):
+    if end_page_number is not None and end_page_number < 1:
+        raise ValueError("end_page_number must be at least 1")
+    if end_page_number is not None and end_page_number < start_page_number:
+        raise ValueError("end_page_number must be at least start_page_number")
+    if (start_page_number != 1 or end_page_number is not None) and (
+        product_type is None or len(product_type) != 1
+    ):
         raise ValueError(
-            "start_page_number can be changed only when one product_type is selected"
+            "page number limits can be set only when one product_type is selected"
         )
     _validate_page_size(page_size)
     _validate_timeout(timeout)
@@ -359,7 +366,12 @@ def scrape_instruments(
         )
         for _product_type, total_count in _product_totals(summary).items():
             page_count = (total_count + page_size - 1) // page_size
-            for page_number in range(start_page_number, page_count + 1):
+            last_page_number = (
+                page_count
+                if end_page_number is None
+                else min(page_count, end_page_number)
+            )
+            for page_number in range(start_page_number, last_page_number + 1):
                 page = get_products_by_filters(
                     _product_type,
                     active_client,
@@ -391,14 +403,21 @@ async def scrape_instruments_async(
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
     start_page_number: int = 1,
+    end_page_number: int | None = None,
     timeout: float = 30,
 ) -> AsyncGenerator[Instrument]:
     """Asynchronously yield instruments filtered by type and country."""
     if start_page_number < 1:
         raise ValueError("start_page_number must be at least 1")
-    if start_page_number != 1 and (product_type is None or len(product_type) != 1):
+    if end_page_number is not None and end_page_number < 1:
+        raise ValueError("end_page_number must be at least 1")
+    if end_page_number is not None and end_page_number < start_page_number:
+        raise ValueError("end_page_number must be at least start_page_number")
+    if (start_page_number != 1 or end_page_number is not None) and (
+        product_type is None or len(product_type) != 1
+    ):
         raise ValueError(
-            "start_page_number can be changed only when one product_type is selected"
+            "page number limits can be set only when one product_type is selected"
         )
     _validate_page_size(page_size)
     _validate_timeout(timeout)
@@ -414,7 +433,12 @@ async def scrape_instruments_async(
         )
         for _product_type, total_count in _product_totals(summary).items():
             page_count = (total_count + page_size - 1) // page_size
-            for page_number in range(start_page_number, page_count + 1):
+            last_page_number = (
+                page_count
+                if end_page_number is None
+                else min(page_count, end_page_number)
+            )
+            for page_number in range(start_page_number, last_page_number + 1):
                 page = await get_products_by_filters_async(
                     _product_type,
                     active_client,

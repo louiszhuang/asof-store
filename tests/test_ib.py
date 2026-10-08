@@ -345,7 +345,39 @@ def test_scrape_instruments_can_start_from_selected_product_page() -> None:
     )
 
     assert requested_pages == [2, 3]
-    assert [product.page for product in products] == [2] * 100 + [3]  # ty: ignore[unresolved-attribute]
+    pages = [product.page for product in products]  # ty: ignore[unresolved-attribute]
+    assert pages == [2] * 100 + [3]
+
+
+def test_scrape_instruments_limits_pages_inclusively() -> None:
+    requested_pages: list[int] = []
+
+    def respond(method: str, url: str, payload: Any) -> FakeResponse:
+        if url == _SUMMARY_URL:
+            return FakeResponse([{"productType": "STK", "totalCount": 401}])
+        page_number = payload["pageNumber"]
+        requested_pages.append(page_number)
+        return FakeResponse(
+            {
+                "products": [
+                    {"type": "STK", "page": page_number, "index": index}
+                    for index in range(100)
+                ]
+            }
+        )
+
+    products = list(
+        scrape_instruments(
+            FakeClient(respond),
+            page_size=100,
+            product_type=["STK"],
+            start_page_number=2,
+            end_page_number=3,
+        )
+    )
+
+    assert requested_pages == [2, 3]
+    assert len(products) == 200
 
 
 def test_scrape_instruments_async_fetches_every_reported_page() -> None:
@@ -453,31 +485,71 @@ def test_scrape_instruments_async_can_start_from_selected_product_page() -> None
         ]
 
         assert requested_pages == [2, 3]
-        assert [product.page for product in products] == [2] * 100 + [  # ty: ignore[unresolved-attribute]
-            3
+        pages = [product.page for product in products]  # ty: ignore[unresolved-attribute]
+        assert pages == [2] * 100 + [3]
+
+    asyncio.run(exercise())
+
+
+def test_scrape_instruments_async_limits_pages_inclusively() -> None:
+    async def exercise() -> None:
+        requested_pages: list[int] = []
+
+        def respond(method: str, url: str, payload: Any) -> FakeResponse:
+            if url == _SUMMARY_URL:
+                return FakeResponse([{"productType": "STK", "totalCount": 401}])
+            page_number = payload["pageNumber"]
+            requested_pages.append(page_number)
+            return FakeResponse(
+                {
+                    "products": [
+                        {"type": "STK", "page": page_number, "index": index}
+                        for index in range(100)
+                    ]
+                }
+            )
+
+        products = [
+            product
+            async for product in scrape_instruments_async(
+                AsyncFakeClient(respond),
+                page_size=100,
+                product_type=["STK"],
+                start_page_number=2,
+                end_page_number=3,
+            )
         ]
+
+        assert requested_pages == [2, 3]
+        assert len(products) == 200
 
     asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(
-    ("product_type", "start_page_number"),
+    ("product_type", "start_page_number", "end_page_number", "error"),
     [
-        (None, 2),
-        (["STK", "BOND"], 2),
-        (["STK"], 0),
+        (None, 2, None, "page number limits"),
+        (["STK", "BOND"], 2, None, "page number limits"),
+        (None, 1, 2, "page number limits"),
+        (["STK"], 0, None, "start_page_number"),
+        (["STK"], 1, 0, "end_page_number"),
+        (["STK"], 3, 2, "end_page_number"),
     ],
 )
 def test_scrape_instruments_rejects_invalid_start_page(
     product_type: list[str] | None,
     start_page_number: int,
+    end_page_number: int | None,
+    error: str,
 ) -> None:
-    with pytest.raises(ValueError, match="start_page_number"):
+    with pytest.raises(ValueError, match=error):
         list(
             scrape_instruments(
                 FakeClient(lambda method, url, payload: FakeResponse([])),
                 product_type=product_type,
                 start_page_number=start_page_number,
+                end_page_number=end_page_number,
             )
         )
 
