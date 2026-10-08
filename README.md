@@ -158,6 +158,18 @@ uv run pytest -m integration tests/integration/test_ib_live.py
 Without `ASOF_STORE_RUN_IB_INTEGRATION=1`, these tests are skipped and the
 default test suite makes no live IB requests.
 
+## Publishing
+
+Releases published on GitHub are built and published to PyPI by
+`.github/workflows/publish.yml`. Before the first release, configure a PyPI
+Trusted Publisher for this GitHub repository with workflow
+`publish.yml` and environment `pypi`. Create the matching `pypi` environment
+in the repository's GitHub Actions settings.
+
+To publish a new version, update the version in `pyproject.toml`, push the
+change, and publish a GitHub Release for that version. The workflow runs the
+test suite before building and publishing the package.
+
 ## Development
 
 Install the test dependency and run the suite with pytest:
