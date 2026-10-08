@@ -62,10 +62,10 @@ postgres_store = AsOfStore.from_sql(
 
 Native SQL types are used where supported, including JSONB for `dict`, `list`,
 and Pydantic `BaseModel` subclasses on PostgreSQL (JSON on SQLite). Pydantic
-models are serialized with `model_dump(mode="json")` and restored to their
-declared model type when read. Other Python types use pickle. SQL stores
-validate writes against the declared types. SQL-backed `datetime` values must
-be timezone-aware.
+models are serialized with `model_dump(mode="json", exclude_unset=True)` and
+restored to their declared model type when read. Other Python types use pickle.
+SQL stores validate writes against the declared types. SQL-backed `datetime`
+values must be timezone-aware.
 Use a distinct table name for each type combination; an existing table is not
 altered if its schema differs. Other Python values are stored with pickle, so
 only use SQL stores with databases you trust, since loading a database
@@ -169,6 +169,28 @@ uv run pytest -m integration tests/integration/test_asof_store_postgres.py
 
 Without the corresponding environment variable, live integration tests are
 skipped and the default test suite makes no live IB or PostgreSQL requests.
+
+### Scraping instruments into an as-of store
+
+Install the scraper and SQL extras, then run the explicit scraper command:
+
+```powershell
+uv sync --extra scraper --extra sql-sqlite
+uv run asof-store scrape-ib --sql-uri "sqlite:///ib-instruments.db"
+```
+
+Use `--sql-uri` with `--table-name` (default `ib_instruments`) to choose the
+destination. Optional repeated `--product-type` and `--product-country`
+arguments filter the scrape; `--new-product` accepts `all`, `T`, or `F`.
+`--print-new` prints each new instrument as JSON, and `--print-changes` prints
+field-level JSON diffs for changed instruments. Progress is reported every
+1,000 instruments by default; `--progress-every` changes that interval. The
+final summary reports processed, new, changed, unchanged, and skipped
+instruments. Records without an IB `conid` are skipped and counted.
+
+The Python API provides `scrape_and_store_instruments(store, ...)` and
+`async_scrape_and_store_instruments(store, ...)`. Both accept an existing
+`AsOfStore[datetime, int, Instrument]` and return a `ScrapeReport`.
 
 ## Publishing
 

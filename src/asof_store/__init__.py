@@ -48,7 +48,9 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value]:
 
 
 def main() -> None:
-    print("Hello from asof-store!")
+    from .ib_scraper import main as ib_scraper_main
+
+    raise SystemExit(ib_scraper_main())
 
 
 __all__ = ["AsOfStore", "AsOfStoreABC", "AsOfView", "main"]

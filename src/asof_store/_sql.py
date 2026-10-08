@@ -105,7 +105,7 @@ def _encode(python_type: type[Any], value: Any) -> Any:
     if _uses_pickle(python_type):
         return pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
     if _is_pydantic_model(python_type):
-        return value.model_dump(mode="json")
+        return value.model_dump(mode="json", exclude_unset=True)
     if python_type is datetime:
         if value.utcoffset() is None:
             raise ValueError("SQL-backed datetime values must be timezone-aware")
