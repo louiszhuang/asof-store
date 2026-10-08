@@ -116,6 +116,21 @@ asyncio.run(main())
 Requests use the live IB API and are not cached or persisted. Product page
 sizes must be 100, 200, 300, 400, or 500.
 
+### Live integration tests
+
+The opt-in integration tests call the real IB UK API, including each endpoint
+and the synchronous and asynchronous scrapers. Install the Zapros and test
+extras, then enable the live tests explicitly:
+
+```powershell
+uv sync --extra zapros --extra dev
+$env:ASOF_STORE_RUN_IB_INTEGRATION = "1"
+uv run pytest -m integration tests/integration/test_ib_live.py
+```
+
+Without `ASOF_STORE_RUN_IB_INTEGRATION=1`, these tests are skipped and the
+default test suite makes no live IB requests.
+
 ## Development
 
 Install the test dependency and run the suite with pytest:
