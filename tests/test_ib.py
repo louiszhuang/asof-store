@@ -112,6 +112,7 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
             client,
             page_number=2,
             page_size=500,
+            product_country=["US", "CA"],
         )
         assert isinstance(exchange_result, ExchangeResponse)
         assert isinstance(summary_result[0], InstrumentSummaryItem)
@@ -124,6 +125,7 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
             _PRODUCTS_URL,
         ]
         assert client.requests[0][2] == {"timeouts": {"total": 12}}
+        assert client.requests[2][2]["payload"]["productCountry"] == ["US", "CA"]
 
     asyncio.run(exercise())
 
@@ -144,6 +146,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         page_number=2,
         page_size=500,
         domain="uk",
+        product_country=["US", "CA"],
     )
     assert summary_result == [InstrumentSummaryItem.model_validate(summary[0])]
     assert isinstance(product_result, ProductsResponse)
@@ -171,7 +174,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         "newProduct": "all",
         "pageNumber": 2,
         "pageSize": 500,
-        "productCountry": [],
+        "productCountry": ["US", "CA"],
         "productSymbol": "",
         "productType": ["STK"],
         "sortDirection": "asc",
@@ -188,7 +191,15 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
 
     def respond(method: str, url: str, payload: Any) -> FakeResponse:
         if url == _SUMMARY_URL:
-            return FakeResponse(summary)
+            assert payload["productType"] == ["STK"]
+            assert payload["productCountry"] == ["US", "CA"]
+            return FakeResponse(
+                [
+                    item
+                    for item in summary
+                    if item["productType"] in payload["productType"]
+                ]
+            )
         product_type = payload["productType"][0]
         page_number = payload["pageNumber"]
         total_count = next(
@@ -208,17 +219,30 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
 
     client = FakeClient(respond)
 
-    results = list(scrape_instruments(client, page_size=100))
+    results = list(
+        scrape_instruments(
+            client,
+            page_size=100,
+            product_type=["STK"],
+            product_country=["US", "CA"],
+        )
+    )
 
-    assert len(results) == 102
+    assert len(results) == 101
     assert isinstance(results[0], Instrument)
     assert results[0].product_type == "STK"
-    assert results[0].page == 1
-    assert results[0].index == 0
-    assert results[99].index == 99
-    assert results[100].page == 2
-    assert results[-1].product_type == "BOND"
-    assert len(client.requests) == 4
+    assert results[0].page == 1  # ty: ignore[unresolved-attribute]
+    assert results[0].index == 0  # ty: ignore[unresolved-attribute]
+    assert results[99].index == 99  # ty: ignore[unresolved-attribute]
+    assert results[100].page == 2  # ty: ignore[unresolved-attribute]
+    assert results[-1].product_type == "STK"
+    assert results[-1].page == 2  # ty: ignore[unresolved-attribute]
+    assert results[-1].index == 0  # ty: ignore[unresolved-attribute]
+    assert len(client.requests) == 3
+    assert all(
+        request[2]["payload"]["productCountry"] == ["US", "CA"]
+        for request in client.requests[1:]
+    )
 
 
 def test_scrape_instruments_async_fetches_every_reported_page() -> None:
@@ -230,7 +254,15 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
 
         def respond(method: str, url: str, payload: Any) -> FakeResponse:
             if url == _SUMMARY_URL:
-                return FakeResponse(summary)
+                assert payload["productType"] == ["STK"]
+                assert payload["productCountry"] == ["US", "CA"]
+                return FakeResponse(
+                    [
+                        item
+                        for item in summary
+                        if item["productType"] in payload["productType"]
+                    ]
+                )
             product_type = payload["productType"][0]
             total_count = next(
                 item["totalCount"]
@@ -253,18 +285,30 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
 
         client = AsyncFakeClient(respond)
         products = [
-            product async for product in scrape_instruments_async(client, page_size=100)
+            product
+            async for product in scrape_instruments_async(
+                client,
+                page_size=100,
+                product_type=["STK"],
+                product_country=["US", "CA"],
+            )
         ]
 
-        assert len(products) == 102
+        assert len(products) == 101
         assert isinstance(products[0], Instrument)
         assert products[0].product_type == "STK"
-        assert products[0].page == 1
-        assert products[0].index == 0
-        assert products[99].index == 99
-        assert products[100].page == 2
-        assert products[-1].product_type == "BOND"
-        assert len(client.requests) == 4
+        assert products[0].page == 1  # ty: ignore[unresolved-attribute]
+        assert products[0].index == 0  # ty: ignore[unresolved-attribute]
+        assert products[99].index == 99  # ty: ignore[unresolved-attribute]
+        assert products[100].page == 2  # ty: ignore[unresolved-attribute]
+        assert products[-1].product_type == "STK"
+        assert products[-1].page == 2  # ty: ignore[unresolved-attribute]
+        assert products[-1].index == 0  # ty: ignore[unresolved-attribute]
+        assert len(client.requests) == 3
+        assert all(
+            request[2]["payload"]["productCountry"] == ["US", "CA"]
+            for request in client.requests[1:]
+        )
 
     asyncio.run(exercise())
 

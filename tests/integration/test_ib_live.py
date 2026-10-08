@@ -106,6 +106,8 @@ def test_live_async_ib_endpoints() -> None:
 def test_live_sync_scraper_yields_instruments() -> None:
     instruments: Iterator[Instrument] = scrape_instruments(
         page_size=_PAGE_SIZE,
+        product_type=["STK"],
+        product_country=["US"],
         timeout=_TIMEOUT,
     )
     try:
@@ -115,12 +117,16 @@ def test_live_sync_scraper_yields_instruments() -> None:
 
     assert isinstance(instrument, Instrument)
     assert instrument.model_dump(exclude_unset=True)
+    assert instrument.product_type == "STK"
+    assert instrument.country == "US"
 
 
 def test_live_async_scraper_yields_instruments() -> None:
     async def exercise() -> None:
         instruments: AsyncIterator[Instrument] = scrape_instruments_async(
             page_size=_PAGE_SIZE,
+            product_type=["STK"],
+            product_country=["US"],
             timeout=_TIMEOUT,
         )
         try:
@@ -130,5 +136,7 @@ def test_live_async_scraper_yields_instruments() -> None:
 
         assert isinstance(instrument, Instrument)
         assert instrument.model_dump(exclude_unset=True)
+        assert instrument.product_type == "STK"
+        assert instrument.country == "US"
 
     asyncio.run(exercise())

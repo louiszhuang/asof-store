@@ -102,6 +102,12 @@ from asof_store.ib import get_exchanges, scrape_instruments
 exchanges = get_exchanges()
 for instrument in scrape_instruments(page_size=500):
     print(instrument)
+
+us_stocks = scrape_instruments(
+    page_size=500,
+    product_type=["STK"],
+    product_country=["US"],
+)
 ```
 
 ```python
@@ -115,12 +121,20 @@ async def main():
     async for instrument in scrape_instruments_async(page_size=500):
         print(instrument)
 
+    async for instrument in scrape_instruments_async(
+        product_type=["STK"],
+        product_country=["US"],
+    ):
+        print(instrument)
+
 
 asyncio.run(main())
 ```
 
-Requests use the live IB API and are not cached or persisted. Product page
-sizes must be 100, 200, 300, 400, or 500.
+`product_type` and `product_country` accept lists of IB product types and
+countries. They filter both the summary used to determine pages and the
+products requests. Requests use the live IB API and are not cached or
+persisted. Product page sizes must be 100, 200, 300, 400, or 500.
 
 ### Live integration tests
 

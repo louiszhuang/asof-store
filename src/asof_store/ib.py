@@ -169,11 +169,21 @@ def get_instrument_summary(
     client: Any | None = None,
     *,
     domain: str = "uk",
+    product_type: list[str] | None = None,
+    product_country: list[str] | None = None,
     timeout: float = 30,
 ) -> list[InstrumentSummaryItem]:
     """Return the instrument counts by IB product type."""
     _validate_timeout(timeout)
-    payload = InstrumentSummaryRequest(domain=domain).model_dump(by_alias=True)
+    payload = InstrumentSummaryRequest(
+        domain=domain,
+        product_type=(
+            InstrumentSummaryRequest().product_type
+            if product_type is None
+            else product_type
+        ),
+        product_country=[] if product_country is None else product_country,
+    ).model_dump(by_alias=True)
     with _using_client(client) as active_client:
         result = _request_json(
             active_client,
@@ -189,11 +199,21 @@ async def get_instrument_summary_async(
     client: Any | None = None,
     *,
     domain: str = "uk",
+    product_type: list[str] | None = None,
+    product_country: list[str] | None = None,
     timeout: float = 30,
 ) -> list[InstrumentSummaryItem]:
     """Asynchronously return instrument counts by IB product type."""
     _validate_timeout(timeout)
-    payload = InstrumentSummaryRequest(domain=domain).model_dump(by_alias=True)
+    payload = InstrumentSummaryRequest(
+        domain=domain,
+        product_type=(
+            InstrumentSummaryRequest().product_type
+            if product_type is None
+            else product_type
+        ),
+        product_country=[] if product_country is None else product_country,
+    ).model_dump(by_alias=True)
     async with _using_async_client(client) as active_client:
         result = await _request_json_async(
             active_client,
@@ -212,6 +232,7 @@ def get_products_by_filters(
     page_number: int = 1,
     page_size: int = 500,
     domain: str = "uk",
+    product_country: list[str] | None = None,
     timeout: float = 30,
 ) -> ProductsResponse:
     """Return one page of IB products for a product type."""
@@ -227,6 +248,7 @@ def get_products_by_filters(
         page_number=page_number,
         page_size=page_size,
         product_type=[product_type],
+        product_country=[] if product_country is None else product_country,
     ).model_dump(by_alias=True)
     with _using_client(client) as active_client:
         result = _request_json(
@@ -246,6 +268,7 @@ async def get_products_by_filters_async(
     page_number: int = 1,
     page_size: int = 500,
     domain: str = "uk",
+    product_country: list[str] | None = None,
     timeout: float = 30,
 ) -> ProductsResponse:
     """Asynchronously return one page of IB products for a product type."""
@@ -261,6 +284,7 @@ async def get_products_by_filters_async(
         page_number=page_number,
         page_size=page_size,
         product_type=[product_type],
+        product_country=[] if product_country is None else product_country,
     ).model_dump(by_alias=True)
     async with _using_async_client(client) as active_client:
         result = await _request_json_async(
@@ -278,9 +302,11 @@ def scrape_instruments(
     *,
     domain: str = "uk",
     page_size: int = 500,
+    product_type: list[str] | None = None,
+    product_country: list[str] | None = None,
     timeout: float = 30,
 ) -> Generator[Instrument]:
-    """Yield instruments, fetching every page reported by the type summary."""
+    """Yield instruments, optionally filtered by product type and country."""
     _validate_page_size(page_size)
     _validate_timeout(timeout)
 
@@ -288,17 +314,20 @@ def scrape_instruments(
         summary = get_instrument_summary(
             active_client,
             domain=domain,
+            product_type=product_type,
+            product_country=product_country,
             timeout=timeout,
         )
-        for product_type, total_count in _product_totals(summary).items():
+        for _product_type, total_count in _product_totals(summary).items():
             page_count = (total_count + page_size - 1) // page_size
             for page_number in range(1, page_count + 1):
                 page = get_products_by_filters(
-                    product_type,
+                    _product_type,
                     active_client,
                     page_number=page_number,
                     page_size=page_size,
                     domain=domain,
+                    product_country=product_country,
                     timeout=timeout,
                 )
                 expected_count = min(
@@ -307,7 +336,7 @@ def scrape_instruments(
                 )
                 yield from _validated_products(
                     page.products,
-                    product_type=product_type,
+                    product_type=_product_type,
                     page_number=page_number,
                     expected_count=expected_count,
                 )
@@ -318,9 +347,11 @@ async def scrape_instruments_async(
     *,
     domain: str = "uk",
     page_size: int = 500,
+    product_type: list[str] | None = None,
+    product_country: list[str] | None = None,
     timeout: float = 30,
 ) -> AsyncGenerator[Instrument]:
-    """Asynchronously yield every instrument reported by the type summary."""
+    """Asynchronously yield instruments filtered by type and country."""
     _validate_page_size(page_size)
     _validate_timeout(timeout)
 
@@ -328,17 +359,20 @@ async def scrape_instruments_async(
         summary = await get_instrument_summary_async(
             active_client,
             domain=domain,
+            product_type=product_type,
+            product_country=product_country,
             timeout=timeout,
         )
-        for product_type, total_count in _product_totals(summary).items():
+        for _product_type, total_count in _product_totals(summary).items():
             page_count = (total_count + page_size - 1) // page_size
             for page_number in range(1, page_count + 1):
                 page = await get_products_by_filters_async(
-                    product_type,
+                    _product_type,
                     active_client,
                     page_number=page_number,
                     page_size=page_size,
                     domain=domain,
+                    product_country=product_country,
                     timeout=timeout,
                 )
                 expected_count = min(
@@ -347,7 +381,7 @@ async def scrape_instruments_async(
                 )
                 for product in _validated_products(
                     page.products,
-                    product_type=product_type,
+                    product_type=_product_type,
                     page_number=page_number,
                     expected_count=expected_count,
                 ):
