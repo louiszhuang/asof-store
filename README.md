@@ -127,6 +127,51 @@ non-empty JSON objects as response values.
 For SQL persistence, create a store with timestamp type `datetime`, key type
 `RequestKey`, and value type `dict`.
 
+## Interactive Brokers data (optional)
+
+Install the Zapros extra to query the Interactive Brokers UK web API:
+
+```sh
+uv add "asof-store[zapros]"
+```
+
+The functions in `asof_store.ib` create and close a Zapros client when one is
+not supplied. Pass an existing client to reuse its connection. `get_exchanges`
+returns the exchange catalogue, `get_instrument_summary` returns product counts
+by type, and `get_products_by_filters` fetches a requested page. To fetch all
+instruments, `scrape_instruments` reads the summary and yields products across
+all reported types and pages:
+
+```python
+from asof_store.ib import get_exchanges, scrape_instruments
+
+exchanges = get_exchanges()
+for instrument in scrape_instruments(page_size=500):
+    print(instrument)
+```
+
+Async equivalents are available for all functions with an `_async` suffix.
+`scrape_instruments_async` is an async iterator:
+
+```python
+import asyncio
+
+from asof_store.ib import get_exchanges_async, scrape_instruments_async
+
+
+async def main():
+    exchanges = await get_exchanges_async()
+    async for instrument in scrape_instruments_async(page_size=500):
+        print(instrument)
+
+
+asyncio.run(main())
+```
+
+These calls access the live IB API and are not cached or persisted. The scraper
+requests pages of up to 500 products by default; use `page_size` to reduce that
+number.
+
 ## Development
 
 Install the test dependency and run the suite with pytest:
