@@ -223,9 +223,13 @@ test suite before building and publishing the package.
 
 ## Development
 
-Install the test dependency and run the suite with pytest:
+Install the development tools, tests, and optional dependencies with uv:
 
 ```sh
 uv sync --all-packages --all-extras
 uv run pytest
 ```
+
+Install the Git commit hooks with `uv run prek install`. The hooks run Ruff
+on changed Python files and check project types with ty when Python files
+change. Run them manually with `uv run prek run --all-files`.
