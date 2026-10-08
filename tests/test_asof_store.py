@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from types import NoneType
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -75,6 +76,15 @@ def test_get_returns_none_when_no_prior_value_exists() -> None:
     assert store.get(10, "missing") is None
 
 
+def test_memory_store_supports_none_type_values() -> None:
+    store = AsOfStore[int, str, NoneType].from_memory()
+
+    assert store.put(10, "item", None) is True
+    assert store.put(10, "item", None) is False
+    assert store.get(10, "item") is None
+    assert store.put(20, "item", None) is False
+
+
 def test_as_of_context_uses_fixed_timestamp() -> None:
     store = AsOfStore.from_memory()
     store.put(10, "item", "original")
@@ -116,6 +126,23 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
     finally:
         store.close()
         text_store.close()
+
+
+def test_sqlite_store_supports_none_type_values() -> None:
+    store = _from_sql(
+        "sqlite:///:memory:",
+        "none_versions",
+        int,
+        str,
+        NoneType,
+    )
+    try:
+        assert store.put(10, "item", None) is True
+        assert store.put(10, "item", None) is False
+        assert store.get(10, "item") is None
+        assert store.put(20, "item", None) is False
+    finally:
+        store.close()
 
 
 def _assert_datetime_timestamp_behavior(store: AsOfStoreABC) -> None:

@@ -87,6 +87,7 @@ def _uses_pickle(python_type: type[Any]) -> bool:
         UUID,
         dict,
         list,
+        type(None),
     }
     return python_type not in native_types and not _is_pydantic_model(python_type)
 
