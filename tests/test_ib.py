@@ -113,6 +113,7 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
             page_number=2,
             page_size=500,
             product_country=["US", "CA"],
+            new_product="F",
         )
         assert isinstance(exchange_result, ExchangeResponse)
         assert isinstance(summary_result[0], InstrumentSummaryItem)
@@ -125,7 +126,9 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
             _PRODUCTS_URL,
         ]
         assert client.requests[0][2] == {"timeouts": {"total": 12}}
+        assert client.requests[1][2]["payload"]["newProduct"] == "all"
         assert client.requests[2][2]["payload"]["productCountry"] == ["US", "CA"]
+        assert client.requests[2][2]["payload"]["newProduct"] == "F"
 
     asyncio.run(exercise())
 
@@ -139,7 +142,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         )
     )
 
-    summary_result = get_instrument_summary(client)
+    summary_result = get_instrument_summary(client, new_product="T")
     product_result = get_products_by_filters(
         "STK",
         client,
@@ -147,6 +150,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         page_size=500,
         domain="uk",
         product_country=["US", "CA"],
+        new_product="F",
     )
     assert summary_result == [InstrumentSummaryItem.model_validate(summary[0])]
     assert isinstance(product_result, ProductsResponse)
@@ -154,6 +158,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
     assert client.requests[0][1] == _SUMMARY_URL
     summary_payload = client.requests[0][2]["payload"]
     assert summary_payload["pageSize"] == 100
+    assert summary_payload["newProduct"] == "T"
     assert summary_payload["productType"] == [
         "CMDTY",
         "FOP",
@@ -171,7 +176,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
     assert client.requests[1][1] == _PRODUCTS_URL
     assert client.requests[1][2]["payload"] == {
         "domain": "uk",
-        "newProduct": "all",
+        "newProduct": "F",
         "pageNumber": 2,
         "pageSize": 500,
         "productCountry": ["US", "CA"],
@@ -193,6 +198,7 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         if url == _SUMMARY_URL:
             assert payload["productType"] == ["STK"]
             assert payload["productCountry"] == ["US", "CA"]
+            assert payload["newProduct"] == "T"
             return FakeResponse(
                 [
                     item
@@ -202,6 +208,7 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
             )
         product_type = payload["productType"][0]
         page_number = payload["pageNumber"]
+        assert payload["newProduct"] == "T"
         total_count = next(
             item["totalCount"]
             for item in summary
@@ -225,6 +232,7 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
             page_size=100,
             product_type=["STK"],
             product_country=["US", "CA"],
+            new_product="T",
         )
     )
 
@@ -243,6 +251,11 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         request[2]["payload"]["productCountry"] == ["US", "CA"]
         for request in client.requests[1:]
     )
+    assert all(
+        request[2]["payload"]["newProduct"] == "T"
+        for request in client.requests
+        if request[1] in (_SUMMARY_URL, _PRODUCTS_URL)
+    )
 
 
 def test_scrape_instruments_async_fetches_every_reported_page() -> None:
@@ -256,6 +269,7 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
             if url == _SUMMARY_URL:
                 assert payload["productType"] == ["STK"]
                 assert payload["productCountry"] == ["US", "CA"]
+                assert payload["newProduct"] == "F"
                 return FakeResponse(
                     [
                         item
@@ -264,6 +278,7 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
                     ]
                 )
             product_type = payload["productType"][0]
+            assert payload["newProduct"] == "F"
             total_count = next(
                 item["totalCount"]
                 for item in summary
@@ -291,6 +306,7 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
                 page_size=100,
                 product_type=["STK"],
                 product_country=["US", "CA"],
+                new_product="F",
             )
         ]
 
@@ -308,6 +324,11 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
         assert all(
             request[2]["payload"]["productCountry"] == ["US", "CA"]
             for request in client.requests[1:]
+        )
+        assert all(
+            request[2]["payload"]["newProduct"] == "F"
+            for request in client.requests
+            if request[1] in (_SUMMARY_URL, _PRODUCTS_URL)
         )
 
     asyncio.run(exercise())
@@ -360,6 +381,17 @@ def test_products_request_model_serializes_ib_api_names() -> None:
 def test_products_request_model_rejects_unsupported_page_size() -> None:
     with pytest.raises(ValueError):
         ProductsByFiltersRequest(product_type=["STK"], page_size=150)
+
+
+@pytest.mark.parametrize("new_product", ["N", "true", ""])
+def test_request_models_reject_unsupported_new_product(
+    new_product: str,
+) -> None:
+    with pytest.raises(ValueError):
+        ProductsByFiltersRequest(
+            product_type=["STK"],
+            new_product=new_product,  # ty: ignore[invalid-argument-type]
+        )
 
 
 @pytest.mark.parametrize(

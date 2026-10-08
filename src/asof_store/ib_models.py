@@ -2,12 +2,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+type NewProduct = Literal["all", "T", "F"]
+
 
 class IBRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     domain: str = "uk"
-    new_product: str = Field(default="all", alias="newProduct")
+    new_product: NewProduct = Field(default="all", alias="newProduct")
     page_number: int = Field(default=1, ge=1, alias="pageNumber")
     page_size: int = Field(
         default=100,

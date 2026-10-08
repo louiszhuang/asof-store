@@ -20,6 +20,7 @@ from asof_store.ib import (
 from asof_store.ib_models import (
     ExchangeResponse,
     Instrument,
+    NewProduct,
     ProductsResponse,
     product_name2id,
 )
@@ -99,6 +100,55 @@ def test_live_async_ib_endpoints() -> None:
             )
             _assert_products(products, total_count=si.total_count)
             break
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("new_product", ["T", "F"])
+def test_live_new_product_filter(new_product: NewProduct) -> None:
+    summary = get_instrument_summary(
+        product_type=["STK"],
+        product_country=["US"],
+        new_product=new_product,
+        timeout=_TIMEOUT,
+    )
+    assert len(summary) == 1
+    total_count = summary[0].total_count
+    assert total_count > 0
+
+    products = get_products_by_filters(
+        "STK",
+        page_size=_PAGE_SIZE,
+        product_country=["US"],
+        new_product=new_product,
+        timeout=_TIMEOUT,
+    )
+    _assert_products(products, total_count=total_count)
+    assert all(product.country == "US" for product in products.products)
+
+
+@pytest.mark.parametrize("new_product", ["T", "F"])
+def test_live_async_new_product_filter(new_product: NewProduct) -> None:
+    async def exercise() -> None:
+        summary = await get_instrument_summary_async(
+            product_type=["STK"],
+            product_country=["US"],
+            new_product=new_product,
+            timeout=_TIMEOUT,
+        )
+        assert len(summary) == 1
+        total_count = summary[0].total_count
+        assert total_count > 0
+
+        products = await get_products_by_filters_async(
+            "STK",
+            page_size=_PAGE_SIZE,
+            product_country=["US"],
+            new_product=new_product,
+            timeout=_TIMEOUT,
+        )
+        _assert_products(products, total_count=total_count)
+        assert all(product.country == "US" for product in products.products)
 
     asyncio.run(exercise())
 

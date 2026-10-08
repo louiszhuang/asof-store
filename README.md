@@ -110,6 +110,7 @@ us_stocks = scrape_instruments(
     page_size=500,
     product_type=["STK"],
     product_country=["US"],
+    new_product="T",
 )
 ```
 
@@ -127,6 +128,7 @@ async def main():
     async for instrument in scrape_instruments_async(
         product_type=["STK"],
         product_country=["US"],
+        new_product="F",
     ):
         print(instrument)
 
@@ -135,9 +137,11 @@ asyncio.run(main())
 ```
 
 `product_type` and `product_country` accept lists of IB product types and
-countries. They filter both the summary used to determine pages and the
-products requests. Requests use the live IB API and are not cached or
-persisted. Product page sizes must be 100, 200, 300, 400, or 500.
+countries. `new_product` accepts `"all"` (default), `"T"`, or `"F"` to select
+all, new, or non-new products. These filters are sent to both the summary used
+to determine pages and the products requests. Requests use the live IB API and
+are not cached or persisted. Product page sizes must be 100, 200, 300, 400, or
+500.
 
 ### Live integration tests
 

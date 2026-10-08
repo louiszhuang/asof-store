@@ -15,6 +15,7 @@ from .ib_models import (
     Instrument,
     InstrumentSummaryItem,
     InstrumentSummaryRequest,
+    NewProduct,
     ProductsByFiltersRequest,
     ProductsResponse,
 )
@@ -171,12 +172,14 @@ def get_instrument_summary(
     domain: str = "uk",
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
+    new_product: NewProduct = "all",
     timeout: float = 30,
 ) -> list[InstrumentSummaryItem]:
     """Return the instrument counts by IB product type."""
     _validate_timeout(timeout)
     payload = InstrumentSummaryRequest(
         domain=domain,
+        new_product=new_product,
         product_type=(
             InstrumentSummaryRequest().product_type
             if product_type is None
@@ -201,12 +204,14 @@ async def get_instrument_summary_async(
     domain: str = "uk",
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
+    new_product: NewProduct = "all",
     timeout: float = 30,
 ) -> list[InstrumentSummaryItem]:
     """Asynchronously return instrument counts by IB product type."""
     _validate_timeout(timeout)
     payload = InstrumentSummaryRequest(
         domain=domain,
+        new_product=new_product,
         product_type=(
             InstrumentSummaryRequest().product_type
             if product_type is None
@@ -233,6 +238,7 @@ def get_products_by_filters(
     page_size: int = 500,
     domain: str = "uk",
     product_country: list[str] | None = None,
+    new_product: NewProduct = "all",
     timeout: float = 30,
 ) -> ProductsResponse:
     """Return one page of IB products for a product type."""
@@ -245,6 +251,7 @@ def get_products_by_filters(
 
     payload = ProductsByFiltersRequest(
         domain=domain,
+        new_product=new_product,
         page_number=page_number,
         page_size=page_size,
         product_type=[product_type],
@@ -269,6 +276,7 @@ async def get_products_by_filters_async(
     page_size: int = 500,
     domain: str = "uk",
     product_country: list[str] | None = None,
+    new_product: NewProduct = "all",
     timeout: float = 30,
 ) -> ProductsResponse:
     """Asynchronously return one page of IB products for a product type."""
@@ -281,6 +289,7 @@ async def get_products_by_filters_async(
 
     payload = ProductsByFiltersRequest(
         domain=domain,
+        new_product=new_product,
         page_number=page_number,
         page_size=page_size,
         product_type=[product_type],
@@ -304,6 +313,7 @@ def scrape_instruments(
     page_size: int = 500,
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
+    new_product: NewProduct = "all",
     timeout: float = 30,
 ) -> Generator[Instrument]:
     """Yield instruments, optionally filtered by product type and country."""
@@ -316,6 +326,7 @@ def scrape_instruments(
             domain=domain,
             product_type=product_type,
             product_country=product_country,
+            new_product=new_product,
             timeout=timeout,
         )
         for _product_type, total_count in _product_totals(summary).items():
@@ -328,6 +339,7 @@ def scrape_instruments(
                     page_size=page_size,
                     domain=domain,
                     product_country=product_country,
+                    new_product=new_product,
                     timeout=timeout,
                 )
                 expected_count = min(
@@ -349,6 +361,7 @@ async def scrape_instruments_async(
     page_size: int = 500,
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
+    new_product: NewProduct = "all",
     timeout: float = 30,
 ) -> AsyncGenerator[Instrument]:
     """Asynchronously yield instruments filtered by type and country."""
@@ -361,6 +374,7 @@ async def scrape_instruments_async(
             domain=domain,
             product_type=product_type,
             product_country=product_country,
+            new_product=new_product,
             timeout=timeout,
         )
         for _product_type, total_count in _product_totals(summary).items():
@@ -373,6 +387,7 @@ async def scrape_instruments_async(
                     page_size=page_size,
                     domain=domain,
                     product_country=product_country,
+                    new_product=new_product,
                     timeout=timeout,
                 )
                 expected_count = min(
