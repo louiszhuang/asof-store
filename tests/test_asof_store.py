@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -169,6 +169,30 @@ def test_json_type_uses_postgresql_jsonb() -> None:
     assert ddl.count("JSONB") == 3
 
 
+def test_pydantic_models_use_json_sql_type_and_round_trip_on_sqlite() -> None:
+    pytest.importorskip("pydantic")
+    from pydantic import BaseModel
+    from sqlalchemy import inspect
+
+    class Payload(BaseModel):
+        name: str
+        tags: list[str]
+
+    store = _from_sql("sqlite:///:memory:", "pydantic_values", int, str, Payload)
+    try:
+        expected = Payload(name="item", tags=["one", "two"])
+        assert store.put(1, "payload", expected) is True
+        assert store.get(1, "payload") == expected
+        column_type = next(
+            column
+            for column in inspect(store._engine).get_columns("pydantic_values")
+            if column["name"] == "value"
+        )["type"]
+        assert str(column_type).upper() == "JSON"
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("value_type", "value"),
     [
@@ -182,82 +206,6 @@ def test_sqlite_json_values_round_trip(value_type: type, value: dict | list) -> 
         store.put(1, "json", value)
         assert store.get(1, "json") == value
     finally:
-        store.close()
-
-
-def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
-    from sqlalchemy import func, inspect, select
-
-    table_name = f"asof_jsonb_{uuid4().hex}"
-    sql_uri = "postgresql://louis@fre.local/louis"
-    store = _from_sql(sql_uri, table_name, int, list, dict)
-    engine = store._engine
-    try:
-        key = ["tenant", {"id": 7}]
-        expected = {"payload": ["café", 1, True, None, {"nested": ["value"]}]}
-        assert store.put(1, key, {"version": 1}) is True
-        assert store.put(2, key, expected) is True
-        assert store.put(3, key, expected) is False
-
-        assert store.get(1, key) == {"version": 1}
-        assert store.get(2, key) == expected
-        assert store.get(3, ["missing"]) is None
-        with engine.connect() as connection:
-            version_count = connection.scalar(
-                select(func.count())
-                .select_from(store._versions)
-                .where(store._versions.c.key == key)
-            )
-        assert version_count == 2
-
-        column_types = {
-            column["name"]: str(column["type"]).upper()
-            for column in inspect(engine).get_columns(table_name)
-        }
-        assert column_types["timestamp"] == "BIGINT"
-        assert column_types["key"] == "JSONB"
-        assert column_types["value"] == "JSONB"
-
-        with engine.connect() as connection:
-            stored_timestamp, stored_key, stored_value = connection.execute(
-                select(
-                    store._versions.c.timestamp,
-                    store._versions.c.key,
-                    store._versions.c.value,
-                ).where(store._versions.c.timestamp == 1)
-            ).one()
-        assert stored_timestamp == 1
-        assert stored_key == key
-        assert stored_value == {"version": 1}
-    finally:
-        store._versions.drop(engine, checkfirst=True)
-        store.close()
-
-
-def test_postgresql_datetime_timestamp_type() -> None:
-    from sqlalchemy import inspect
-
-    table_name = f"asof_datetime_{uuid4().hex}"
-    store = _from_sql(
-        "postgresql://louis@fre.local/louis",
-        table_name,
-        datetime,
-        str,
-        str,
-    )
-    try:
-        timestamp_column = next(
-            column
-            for column in inspect(store._engine).get_columns(table_name)
-            if column["name"] == "timestamp"
-        )
-        assert (
-            hasattr(timestamp_column["type"], "timezone")
-            and timestamp_column["type"].timezone is True
-        )
-        _assert_datetime_timestamp_behavior(store)
-    finally:
-        store._versions.drop(store._engine, checkfirst=True)
         store.close()
 
 
@@ -328,28 +276,6 @@ def test_sqlite_supports_all_sortable_timestamp_types(
     try:
         _assert_timestamp_type_ordering(store, earlier, later)
     finally:
-        store.close()
-
-
-@pytest.mark.parametrize(
-    ("timestamp_type", "earlier", "later"),
-    _SORTABLE_TIMESTAMP_CASES,
-)
-def test_postgresql_supports_all_sortable_timestamp_types(
-    timestamp_type: type, earlier, later
-) -> None:
-    table_name = f"asof_ts_{timestamp_type.__name__}_{uuid4().hex}"
-    store = _from_sql(
-        "postgresql://louis@fre.local/louis",
-        table_name,
-        timestamp_type,  # ty: ignore[invalid-argument-type]
-        str,
-        str,
-    )
-    try:
-        _assert_timestamp_type_ordering(store, earlier, later)
-    finally:
-        store._versions.drop(store._engine, checkfirst=True)
         store.close()
 
 

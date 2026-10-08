@@ -61,9 +61,17 @@ def _sql_type(python_type: type[Any]) -> TypeEngine[Any]:
         return Numeric()
     if python_type is UUID:
         return Uuid(as_uuid=True)
-    if python_type in (dict, list):
+    if python_type in (dict, list) or _is_pydantic_model(python_type):
         return JSON().with_variant(JSONB, "postgresql")
     return LargeBinary()
+
+
+def _is_pydantic_model(python_type: type[Any]) -> bool:
+    try:
+        from pydantic import BaseModel
+    except ImportError:
+        return False
+    return issubclass(python_type, BaseModel)
 
 
 def _uses_pickle(python_type: type[Any]) -> bool:
@@ -80,7 +88,7 @@ def _uses_pickle(python_type: type[Any]) -> bool:
         dict,
         list,
     }
-    return python_type not in native_types
+    return python_type not in native_types and not _is_pydantic_model(python_type)
 
 
 def _encode(python_type: type[Any], value: Any) -> Any:
@@ -96,6 +104,8 @@ def _encode(python_type: type[Any], value: Any) -> Any:
         )
     if _uses_pickle(python_type):
         return pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+    if _is_pydantic_model(python_type):
+        return value.model_dump(mode="json")
     if python_type is datetime:
         if value.utcoffset() is None:
             raise ValueError("SQL-backed datetime values must be timezone-aware")
@@ -108,6 +118,8 @@ def _decode(python_type: type[Any], value: Any) -> Any:
         return None
     if _uses_pickle(python_type):
         return pickle.loads(value)
+    if _is_pydantic_model(python_type):
+        return python_type.model_validate(value)
     if python_type is datetime and value.utcoffset() is None:
         return value.replace(tzinfo=UTC)
     return value

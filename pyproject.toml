@@ -23,7 +23,7 @@ dev = ["pytest>=9"]
 asof-store = "asof_store:main"
 
 [tool.pytest.ini_options]
-markers = ["integration: tests that make live requests to external services"]
+markers = ["integration: tests that depend on live external services"]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]

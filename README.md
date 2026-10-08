@@ -60,9 +60,12 @@ postgres_store = AsOfStore.from_sql(
 )
 ```
 
-Native SQL types are used where supported, including JSONB for `dict` and
-`list` on PostgreSQL. Other Python types use pickle. SQL stores validate writes
-against the declared types. SQL-backed `datetime` values must be timezone-aware.
+Native SQL types are used where supported, including JSONB for `dict`, `list`,
+and Pydantic `BaseModel` subclasses on PostgreSQL (JSON on SQLite). Pydantic
+models are serialized with `model_dump(mode="json")` and restored to their
+declared model type when read. Other Python types use pickle. SQL stores
+validate writes against the declared types. SQL-backed `datetime` values must
+be timezone-aware.
 Use a distinct table name for each type combination; an existing table is not
 altered if its schema differs. Other Python values are stored with pickle, so
 only use SQL stores with databases you trust, since loading a database
@@ -145,9 +148,9 @@ are not cached or persisted. Product page sizes must be 100, 200, 300, 400, or
 
 ### Live integration tests
 
-The opt-in integration tests call the real IB UK API, including each endpoint
-and the synchronous and asynchronous scrapers. Install the Zapros and test
-extras, then enable the live tests explicitly:
+Opt-in integration tests are kept in `tests/integration/`. The IB tests call the
+real IB UK API, including each endpoint and the synchronous and asynchronous
+scrapers. Install the Zapros and test extras, then enable those tests explicitly:
 
 ```powershell
 uv sync --extra zapros --extra dev
@@ -155,8 +158,17 @@ $env:ASOF_STORE_RUN_IB_INTEGRATION = "1"
 uv run pytest -m integration tests/integration/test_ib_live.py
 ```
 
-Without `ASOF_STORE_RUN_IB_INTEGRATION=1`, these tests are skipped and the
-default test suite makes no live IB requests.
+The PostgreSQL tests use `postgresql://louis@fre.local/louis`. Install the
+PostgreSQL and test extras, then enable them explicitly:
+
+```powershell
+uv sync --extra sql-postgres --extra dev
+$env:ASOF_STORE_RUN_POSTGRES_INTEGRATION = "1"
+uv run pytest -m integration tests/integration/test_asof_store_postgres.py
+```
+
+Without the corresponding environment variable, live integration tests are
+skipped and the default test suite makes no live IB or PostgreSQL requests.
 
 ## Publishing
 
