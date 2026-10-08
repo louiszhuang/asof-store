@@ -6,8 +6,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, TextIO
 
-from . import AsOfStore
 from ._abc import AsOfStoreABC
+from ._store import AsOfStore
 from .ib import scrape_instruments, scrape_instruments_async
 from .ib_models import Instrument, NewProduct
 
