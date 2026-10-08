@@ -182,6 +182,8 @@ uv run asof-store scrape-ib --sql-uri "sqlite:///ib-instruments.db"
 Use `--sql-uri` with `--table-name` (default `ib_instruments`) to choose the
 destination. Optional repeated `--product-type` and `--product-country`
 arguments filter the scrape; `--new-product` accepts `all`, `T`, or `F`.
+`--start-page-number` resumes pagination at a given page and requires exactly
+one `--product-type`; pages before it are not requested.
 `--print-new` prints each new instrument as JSON, and `--print-changes` prints
 field-level JSON diffs for changed instruments. Progress is reported every
 1,000 instruments by default; `--progress-every` changes that interval. The
@@ -190,7 +192,8 @@ instruments. Records without an IB `conid` are skipped and counted.
 
 The Python API provides `scrape_and_store_instruments(store, ...)` and
 `async_scrape_and_store_instruments(store, ...)`. Both accept an existing
-`AsOfStore[datetime, int, Instrument]` and return a `ScrapeReport`.
+`AsOfStore[datetime, int, Instrument]` and return a `ScrapeReport`. Pass
+`start_page_number` to either function to resume a single-product-type scrape.
 
 ## Publishing
 

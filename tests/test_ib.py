@@ -258,6 +258,36 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
     )
 
 
+def test_scrape_instruments_can_start_from_selected_product_page() -> None:
+    requested_pages: list[int] = []
+
+    def respond(method: str, url: str, payload: Any) -> FakeResponse:
+        if url == _SUMMARY_URL:
+            return FakeResponse([{"productType": "STK", "totalCount": 201}])
+        page_number = payload["pageNumber"]
+        requested_pages.append(page_number)
+        return FakeResponse(
+            {
+                "products": [
+                    {"type": "STK", "page": page_number, "index": index}
+                    for index in range(min(100, 201 - (page_number - 1) * 100))
+                ]
+            }
+        )
+
+    products = list(
+        scrape_instruments(
+            FakeClient(respond),
+            page_size=100,
+            product_type=["STK"],
+            start_page_number=2,
+        )
+    )
+
+    assert requested_pages == [2, 3]
+    assert [product.page for product in products] == [2] * 100 + [3]  # ty: ignore[unresolved-attribute]
+
+
 def test_scrape_instruments_async_fetches_every_reported_page() -> None:
     async def exercise() -> None:
         summary = [
@@ -332,6 +362,64 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
         )
 
     asyncio.run(exercise())
+
+
+def test_scrape_instruments_async_can_start_from_selected_product_page() -> None:
+    async def exercise() -> None:
+        requested_pages: list[int] = []
+
+        def respond(method: str, url: str, payload: Any) -> FakeResponse:
+            if url == _SUMMARY_URL:
+                return FakeResponse([{"productType": "STK", "totalCount": 201}])
+            page_number = payload["pageNumber"]
+            requested_pages.append(page_number)
+            return FakeResponse(
+                {
+                    "products": [
+                        {"type": "STK", "page": page_number, "index": index}
+                        for index in range(min(100, 201 - (page_number - 1) * 100))
+                    ]
+                }
+            )
+
+        products = [
+            product
+            async for product in scrape_instruments_async(
+                AsyncFakeClient(respond),
+                page_size=100,
+                product_type=["STK"],
+                start_page_number=2,
+            )
+        ]
+
+        assert requested_pages == [2, 3]
+        assert [product.page for product in products] == [2] * 100 + [  # ty: ignore[unresolved-attribute]
+            3
+        ]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("product_type", "start_page_number"),
+    [
+        (None, 2),
+        (["STK", "BOND"], 2),
+        (["STK"], 0),
+    ],
+)
+def test_scrape_instruments_rejects_invalid_start_page(
+    product_type: list[str] | None,
+    start_page_number: int,
+) -> None:
+    with pytest.raises(ValueError, match="start_page_number"):
+        list(
+            scrape_instruments(
+                FakeClient(lambda method, url, payload: FakeResponse([])),
+                product_type=product_type,
+                start_page_number=start_page_number,
+            )
+        )
 
 
 @pytest.mark.parametrize(

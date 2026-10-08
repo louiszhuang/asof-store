@@ -104,6 +104,7 @@ def scrape_and_store_instruments(
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    start_page_number: int = 1,
     timeout: float = 30,
     print_new: bool = False,
     print_changes: bool = False,
@@ -121,6 +122,7 @@ def scrape_and_store_instruments(
         product_type=product_type,
         product_country=product_country,
         new_product=new_product,
+        start_page_number=start_page_number,
         timeout=timeout,
     )
     for instrument in instruments:
@@ -145,6 +147,7 @@ async def async_scrape_and_store_instruments(
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    start_page_number: int = 1,
     timeout: float = 30,
     print_new: bool = False,
     print_changes: bool = False,
@@ -162,6 +165,7 @@ async def async_scrape_and_store_instruments(
         product_type=product_type,
         product_country=product_country,
         new_product=new_product,
+        start_page_number=start_page_number,
         timeout=timeout,
     )
     async for instrument in instruments:
@@ -191,6 +195,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ib_parser.add_argument("--page-size", type=int, default=500)
     ib_parser.add_argument("--product-type", action="append")
     ib_parser.add_argument("--product-country", action="append")
+    ib_parser.add_argument(
+        "--start-page-number",
+        type=int,
+        help="start at this page (requires exactly one --product-type)",
+    )
     ib_parser.add_argument("--new-product", choices=("all", "T", "F"), default="all")
     ib_parser.add_argument("--timeout", type=float, default=30)
     ib_parser.add_argument("--print-new", action="store_true")
@@ -212,6 +221,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.progress_every < 1:
         raise ValueError("--progress-every must be at least 1")
+    if args.start_page_number is not None:
+        if args.start_page_number < 1:
+            raise ValueError("--start-page-number must be at least 1")
+        if args.product_type is None or len(args.product_type) != 1:
+            raise ValueError("--start-page-number requires exactly one --product-type")
 
     try:
         store = AsOfStore[datetime, int, Instrument].from_sql(
@@ -240,6 +254,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             product_type=args.product_type,
             product_country=args.product_country,
             new_product=args.new_product,
+            start_page_number=(
+                1 if args.start_page_number is None else args.start_page_number
+            ),
             timeout=args.timeout,
             print_new=args.print_new,
             print_changes=args.print_changes,

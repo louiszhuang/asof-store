@@ -178,6 +178,8 @@ def test_cli_wires_filters_progress_and_closes_store(
             "instruments",
             "--product-type",
             "STK",
+            "--start-page-number",
+            "3",
             "--product-country",
             "US",
             "--new-product",
@@ -194,6 +196,7 @@ def test_cli_wires_filters_progress_and_closes_store(
         ("sqlite:///:memory:", "instruments", datetime, int, Instrument)
     ]
     assert captured["product_type"] == ["STK"]
+    assert captured["start_page_number"] == 3
     assert captured["product_country"] == ["US"]
     assert captured["new_product"] == "T"
     assert captured["print_new"] is True
@@ -209,3 +212,32 @@ def test_cli_rejects_nonpositive_progress_interval() -> None:
         ib_scraper.main(
             ["scrape-ib", "--sql-uri", "sqlite:///:memory:", "--progress-every", "0"]
         )
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    [
+        (
+            ["--start-page-number", "0", "--product-type", "STK"],
+            "--start-page-number",
+        ),
+        (
+            [
+                "--start-page-number",
+                "2",
+                "--product-type",
+                "STK",
+                "--product-type",
+                "BOND",
+            ],
+            "exactly one --product-type",
+        ),
+        (["--start-page-number", "2"], "exactly one --product-type"),
+    ],
+)
+def test_cli_validates_start_page_number(
+    extra_args: list[str],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        ib_scraper.main(["scrape-ib", "--sql-uri", "sqlite:///:memory:", *extra_args])
