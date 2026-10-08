@@ -406,3 +406,13 @@ def test_instrument_model_preserves_unmodeled_ib_fields() -> None:
         "symbol": "ABC",
         "vendorField": {"extra": True},
     }
+    assert instrument.primary_key == 123
+    assert Instrument.model_json_schema()["properties"]["conid"]["primary_key"]
+
+
+def test_instrument_primary_key_is_missing_when_ib_omits_conid() -> None:
+    instrument = Instrument.model_validate(
+        {"type": "OPT", "symbol": "0BN", "conid": None, "fcConid": 1}
+    )
+
+    assert instrument.primary_key is None

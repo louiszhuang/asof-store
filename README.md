@@ -72,7 +72,8 @@ SQL timestamps must use sortable scalar types supported by the database (such
 as integers, strings, dates, datetimes, decimals, and UUIDs); compound JSON and
 arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
 supported because PostgreSQL does not provide ordering comparisons for them.
-SQL stores index `(key, timestamp)` for efficient latest-version lookups.
+SQL tables use `(key, timestamp)` as a composite primary key, which also
+provides the index used for efficient latest-version lookups.
 
 ## Interactive Brokers data (optional)
 
@@ -94,7 +95,9 @@ The API returns Pydantic models: `ExchangeResponse`, `InstrumentSummaryItem`,
 `ProductsResponse`, and `Instrument`. Request models
 `InstrumentSummaryRequest` and `ProductsByFiltersRequest` serialize field names
 to the format expected by IB. Instrument models allow additional IB fields so
-new or product-specific response fields are retained.
+new or product-specific response fields are retained. `Instrument.conid` is
+the IB contract ID and is marked as the primary key; some IB product types omit
+it, in which case `Instrument.primary_key` returns `None`.
 
 ```python
 from asof_store.ib import get_exchanges, scrape_instruments

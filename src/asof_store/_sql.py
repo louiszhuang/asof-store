@@ -1,7 +1,6 @@
 import pickle
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -13,11 +12,10 @@ from sqlalchemy import (
     Date,
     DateTime,
     Float,
-    Index,
-    Integer,
     LargeBinary,
     MetaData,
     Numeric,
+    PrimaryKeyConstraint,
     Table,
     Text,
     Uuid,
@@ -163,7 +161,6 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         self._versions = Table(
             table_name,
             metadata,
-            Column("id", Integer, primary_key=True, autoincrement=True),
             Column(
                 "timestamp",
                 _sql_type(timestamp_type),
@@ -179,12 +176,7 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
                 _sql_type(value_type),
                 nullable=True,
             ),
-        )
-        index_suffix = sha256(table_name.encode()).hexdigest()[:16]
-        Index(
-            f"ix_{index_suffix}_key_timestamp",
-            self._versions.c.key,
-            self._versions.c.timestamp.desc(),
+            PrimaryKeyConstraint("key", "timestamp"),
         )
         metadata.create_all(self._engine)
 

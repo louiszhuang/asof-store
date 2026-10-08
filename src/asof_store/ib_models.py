@@ -120,7 +120,10 @@ class Instrument(BaseModel):
     exchange_id: str | None = Field(default=None, alias="exchangeId")
     local_symbol: str | None = Field(default=None, alias="localSymbol")
     description: str | None = None
-    conid: int | None = None
+    conid: int | None = Field(
+        default=None,
+        json_schema_extra={"primary_key": True},
+    )
     under_conid: int | None = Field(default=None, alias="underConid")
     isin: str | None = None
     cusip: str | None = None
@@ -130,6 +133,11 @@ class Instrument(BaseModel):
     is_new_product: str | bool | None = Field(default=None, alias="isNewPdt")
     associated_entity_id: str | None = Field(default=None, alias="assocEntityId")
     fc_conid: int | None = None
+
+    @property
+    def primary_key(self) -> int | None:
+        """Return IB's contract ID when the response supplies one."""
+        return self.conid
 
 
 class ProductsResponse(BaseModel):

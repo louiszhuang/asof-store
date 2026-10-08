@@ -1,21 +1,26 @@
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pytest
 
 from asof_store import AsOfStore, AsOfStoreABC, AsOfView
+from asof_store._sql import SqlBackend
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsAllComparisons
 
 
-def _from_sql(
+def _from_sql[T: SupportsAllComparisons, K, V](
     sql_uri: str,
     table_name: str,
-    timestamp_type: type,
-    key_type: type,
-    value_type: type,
-) -> AsOfStoreABC:
+    timestamp_type: type[T],
+    key_type: type[K],
+    value_type: type[V],
+) -> SqlBackend[T, K, V]:
     try:
-        return AsOfStore.from_sql(
+        return AsOfStore[T, K, V].from_sql(
             sql_uri, table_name, timestamp_type, key_type, value_type
         )
     except ImportError as exc:
@@ -186,7 +191,7 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
     table_name = f"asof_jsonb_{uuid4().hex}"
     sql_uri = "postgresql://louis@fre.local/louis"
     store = _from_sql(sql_uri, table_name, int, list, dict)
-    engine = store._engine  # ty: ignore[unresolved-attribute]
+    engine = store._engine
     try:
         key = ["tenant", {"id": 7}]
         expected = {"payload": ["café", 1, True, None, {"nested": ["value"]}]}
@@ -200,10 +205,8 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
         with engine.connect() as connection:
             version_count = connection.scalar(
                 select(func.count())
-                .select_from(store._versions)  # ty: ignore[unresolved-attribute]
-                .where(
-                    store._versions.c.key == key  # ty: ignore[unresolved-attribute]
-                )
+                .select_from(store._versions)
+                .where(store._versions.c.key == key)
             )
         assert version_count == 2
 
@@ -218,16 +221,16 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
         with engine.connect() as connection:
             stored_timestamp, stored_key, stored_value = connection.execute(
                 select(
-                    store._versions.c.timestamp,  # ty: ignore[unresolved-attribute]
-                    store._versions.c.key,  # ty: ignore[unresolved-attribute]
-                    store._versions.c.value,  # ty: ignore[unresolved-attribute]
-                ).where(store._versions.c.timestamp == 1)  # ty: ignore[unresolved-attribute]
+                    store._versions.c.timestamp,
+                    store._versions.c.key,
+                    store._versions.c.value,
+                ).where(store._versions.c.timestamp == 1)
             ).one()
         assert stored_timestamp == 1
         assert stored_key == key
         assert stored_value == {"version": 1}
     finally:
-        store._versions.drop(engine, checkfirst=True)  # ty: ignore[unresolved-attribute]
+        store._versions.drop(engine, checkfirst=True)
         store.close()
 
 
@@ -245,13 +248,16 @@ def test_postgresql_datetime_timestamp_type() -> None:
     try:
         timestamp_column = next(
             column
-            for column in inspect(store._engine).get_columns(table_name)  # ty: ignore[unresolved-attribute]
+            for column in inspect(store._engine).get_columns(table_name)
             if column["name"] == "timestamp"
         )
-        assert timestamp_column["type"].timezone is True
+        assert (
+            hasattr(timestamp_column["type"], "timezone")
+            and timestamp_column["type"].timezone is True
+        )
         _assert_datetime_timestamp_behavior(store)
     finally:
-        store._versions.drop(store._engine, checkfirst=True)  # ty: ignore[unresolved-attribute]
+        store._versions.drop(store._engine, checkfirst=True)
         store.close()
 
 
@@ -259,9 +265,9 @@ def test_sql_store_enforces_declared_types() -> None:
     store = _from_sql("sqlite:///:memory:", "typed_versions", int, str, dict)
     try:
         with pytest.raises(TypeError, match="Expected value of type int"):
-            store.put("10", "item", {})
+            store.put("10", "item", {})  # ty: ignore[invalid-argument-type]
         with pytest.raises(TypeError, match="Expected value of type dict"):
-            store.put(10, "item", "not json")
+            store.put(10, "item", "not json")  # ty: ignore[invalid-argument-type]
     finally:
         store.close()
 
@@ -315,7 +321,7 @@ def test_sqlite_supports_all_sortable_timestamp_types(
     store = _from_sql(
         "sqlite:///:memory:",
         f"timestamps_{timestamp_type.__name__}",
-        timestamp_type,
+        timestamp_type,  # ty: ignore[invalid-argument-type]
         str,
         str,
     )
@@ -336,24 +342,29 @@ def test_postgresql_supports_all_sortable_timestamp_types(
     store = _from_sql(
         "postgresql://louis@fre.local/louis",
         table_name,
-        timestamp_type,
+        timestamp_type,  # ty: ignore[invalid-argument-type]
         str,
         str,
     )
     try:
         _assert_timestamp_type_ordering(store, earlier, later)
     finally:
-        store._versions.drop(store._engine, checkfirst=True)  # ty: ignore[unresolved-attribute]
+        store._versions.drop(store._engine, checkfirst=True)
         store.close()
 
 
-def test_sql_store_indexes_key_and_timestamp_together() -> None:
+def test_sql_store_uses_key_and_timestamp_as_composite_primary_key() -> None:
     from sqlalchemy import inspect
 
-    store = _from_sql("sqlite:///:memory:", "indexed_versions", int, str, str)
+    store = _from_sql("sqlite:///:memory:", "primary_key_versions", int, str, str)
     try:
-        indexes = inspect(store._engine).get_indexes("indexed_versions")  # ty: ignore[unresolved-attribute]
-        assert any(index["column_names"] == ["key", "timestamp"] for index in indexes)
+        inspector = inspect(store._engine)
+        assert inspector.get_pk_constraint("primary_key_versions")[
+            "constrained_columns"
+        ] == ["key", "timestamp"]
+        assert {
+            column["name"] for column in inspector.get_columns("primary_key_versions")
+        } == {"key", "timestamp", "value"}
     finally:
         store.close()
 
@@ -362,7 +373,7 @@ def test_sql_store_uses_the_requested_table_name() -> None:
     table_name = "my_asof_versions"
     store = _from_sql("sqlite:///:memory:", table_name, int, str, dict)
     try:
-        assert store._versions.name == table_name  # ty: ignore[unresolved-attribute]
+        assert store._versions.name == table_name
     finally:
         store.close()
 
