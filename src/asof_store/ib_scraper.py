@@ -4,6 +4,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from types import NoneType
 from typing import Any, TextIO
 
 from ._abc import AsOfStoreABC
@@ -17,6 +18,7 @@ from .ib import (
 from .ib_models import Exchange, Instrument, NewProduct
 
 type InstrumentStore = AsOfStoreABC[datetime, int, Instrument]
+type MissingPrimaryKeyStore = AsOfStoreABC[datetime, Instrument, NoneType]
 type ExchangeStore = AsOfStoreABC[datetime, tuple[str, str], Exchange]
 type ProgressCallback = Callable[["ScrapeReport"], None]
 
@@ -28,7 +30,7 @@ class ScrapeReport:
     new: int = 0
     changed: int = 0
     unchanged: int = 0
-    skipped_missing_primary_key: int = 0
+    missing_primary_key: int = 0
 
 
 def _instrument_json(instrument: Instrument) -> dict[str, object]:
@@ -108,6 +110,7 @@ def _print_json(output: TextIO, value: object) -> None:
 
 def _record_instrument(
     store: InstrumentStore,
+    missing_primary_key_store: MissingPrimaryKeyStore,
     instrument: Instrument,
     report: ScrapeReport,
     *,
@@ -118,7 +121,17 @@ def _record_instrument(
     report.processed += 1
     primary_key = instrument.primary_key
     if primary_key is None:
-        report.skipped_missing_primary_key += 1
+        report.missing_primary_key += 1
+        stored = missing_primary_key_store.put(report.as_of, instrument, None)
+        if stored:
+            report.new += 1
+            if print_new:
+                _print_json(
+                    output,
+                    {"event": "new", "instrument": _instrument_json(instrument)},
+                )
+        else:
+            report.unchanged += 1
         return
 
     current = _instrument_json(instrument)
@@ -153,6 +166,7 @@ def _record_instrument(
 def scrape_and_store_instruments(
     store: InstrumentStore,
     *,
+    missing_primary_key_store: MissingPrimaryKeyStore,
     domain: str = "uk",
     page_size: int = 500,
     product_type: list[str] | None = None,
@@ -184,6 +198,7 @@ def scrape_and_store_instruments(
     for instrument in instruments:
         _record_instrument(
             store,
+            missing_primary_key_store,
             instrument,
             report,
             print_new=print_new,
@@ -198,6 +213,7 @@ def scrape_and_store_instruments(
 async def async_scrape_and_store_instruments(
     store: InstrumentStore,
     *,
+    missing_primary_key_store: MissingPrimaryKeyStore,
     domain: str = "uk",
     page_size: int = 500,
     product_type: list[str] | None = None,
@@ -229,6 +245,7 @@ async def async_scrape_and_store_instruments(
     async for instrument in instruments:
         _record_instrument(
             store,
+            missing_primary_key_store,
             instrument,
             report,
             print_new=print_new,
@@ -316,6 +333,11 @@ def _build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--print-changes", action="store_true")
         subparser.add_argument("--progress-every", type=int, default=1000)
 
+    instruments_parser.add_argument(
+        "--missing-primary-key-table-name",
+        default="ib_instrument_templates",
+        help="table for instruments that do not have a conid",
+    )
     instruments_parser.add_argument("--domain", default="uk")
     instruments_parser.add_argument("--page-size", type=int, default=500)
     instruments_parser.add_argument("--product-type", action="append")
@@ -342,7 +364,7 @@ def _print_progress(report: ScrapeReport, output: TextIO) -> None:
     print(
         f"Processed {report.processed}: new={report.new}, "
         f"changed={report.changed}, unchanged={report.unchanged}, "
-        f"skipped={report.skipped_missing_primary_key}",
+        f"missing_primary_key={report.missing_primary_key}",
         file=output,
     )
 
@@ -352,6 +374,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.progress_every < 1:
         raise ValueError("--progress-every must be at least 1")
     if args.command == "scrape-instruments":
+        if args.table_name == args.missing_primary_key_table_name:
+            raise ValueError(
+                "--table-name and --missing-primary-key-table-name must differ"
+            )
         if args.start_page_number is not None and args.start_page_number < 1:
             raise ValueError("--start-page-number must be at least 1")
         if args.end_page_number is not None and args.end_page_number < 1:
@@ -372,6 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     is_instruments = args.command == "scrape-instruments"
     key_type = int if is_instruments else tuple
     value_type = Instrument if is_instruments else Exchange
+    missing_primary_key_store: MissingPrimaryKeyStore | None = None
     try:
         store = AsOfStore.from_sql(
             args.sql_uri,
@@ -380,6 +407,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             key_type,
             value_type,
         )
+        if is_instruments:
+            try:
+                missing_primary_key_store = AsOfStore.from_sql(
+                    args.sql_uri,
+                    args.missing_primary_key_table_name,
+                    datetime,
+                    Instrument,
+                    NoneType,
+                )
+            except Exception:
+                store.close()
+                raise
     except ImportError as exc:
         raise ImportError(
             "The IB scraper CLI requires SQLAlchemy; install "
@@ -393,8 +432,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _print_progress(report, sys.stderr)
 
         if is_instruments:
+            assert missing_primary_key_store is not None
             result = scrape_and_store_instruments(
                 store,
+                missing_primary_key_store=missing_primary_key_store,
                 domain=args.domain,
                 page_size=args.page_size,
                 product_type=args.product_type,
@@ -423,12 +464,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Scrape complete: "
             f"processed={result.processed}, new={result.new}, "
             f"changed={result.changed}, unchanged={result.unchanged}, "
-            f"skipped_missing_primary_key={result.skipped_missing_primary_key}, "
+            f"missing_primary_key={result.missing_primary_key}, "
             f"as_of={result.as_of.isoformat()}",
             file=sys.stderr,
         )
     finally:
         store.close()
+        if missing_primary_key_store is not None:
+            missing_primary_key_store.close()
     return 0
 
 

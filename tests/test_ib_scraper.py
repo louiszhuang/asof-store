@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from io import StringIO
+from types import NoneType
 from typing import Any
 
 import pytest
@@ -42,6 +43,7 @@ def test_scrape_and_store_classifies_records_and_prints_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = AsOfStore.from_memory()
+    missing_primary_key_store = AsOfStore.from_memory()
     output = StringIO()
     progress = []
     monkeypatch.setattr(
@@ -58,17 +60,22 @@ def test_scrape_and_store_classifies_records_and_prints_details(
 
     first = ib_scraper.scrape_and_store_instruments(
         store,
+        missing_primary_key_store=missing_primary_key_store,
         print_new=True,
         output=output,
         on_progress=progress.append,
     )
 
-    assert (first.processed, first.new, first.changed, first.unchanged) == (3, 2, 0, 0)
-    assert first.skipped_missing_primary_key == 1
+    assert (first.processed, first.new, first.changed, first.unchanged) == (3, 3, 0, 0)
+    assert first.missing_primary_key == 1
+    assert missing_primary_key_store.get(
+        first.as_of,
+        _instrument(None, "NO-ID"),
+    ) is None
     assert progress[-1] == first
     assert store.get(first.as_of, 1) == _instrument(1, "FIRST")
     printed = [json.loads(line) for line in output.getvalue().splitlines() if line]
-    assert len(printed) == 2
+    assert len(printed) == 3
     assert printed[0]["event"] == "new"
 
     monkeypatch.setattr(
@@ -85,6 +92,7 @@ def test_scrape_and_store_classifies_records_and_prints_details(
     output = StringIO()
     second = ib_scraper.scrape_and_store_instruments(
         store,
+        missing_primary_key_store=missing_primary_key_store,
         print_changes=True,
         output=output,
     )
@@ -114,6 +122,7 @@ def test_async_scrape_and_store_saves_instrument_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = AsOfStore.from_memory()
+    missing_primary_key_store = AsOfStore.from_memory()
 
     async def fake_scrape(*args: Any, **kwargs: Any):
         yield _instrument(42, "ASYNC")
@@ -121,12 +130,24 @@ def test_async_scrape_and_store_saves_instrument_models(
 
     monkeypatch.setattr(ib_scraper, "scrape_instruments_async", fake_scrape)
 
-    report = asyncio.run(ib_scraper.async_scrape_and_store_instruments(store))
+    report = asyncio.run(
+        ib_scraper.async_scrape_and_store_instruments(
+            store,
+            missing_primary_key_store=missing_primary_key_store,
+        )
+    )
 
     assert report.processed == 2
-    assert report.new == 1
-    assert report.skipped_missing_primary_key == 1
+    assert report.new == 2
+    assert report.missing_primary_key == 1
     assert store.get(report.as_of, 42) == _instrument(42, "ASYNC")
+    assert (
+        missing_primary_key_store.get(
+            report.as_of,
+            _instrument(None, "MISSING"),
+        )
+        is None
+    )
 
 
 def test_scrape_and_store_uses_sql_store_idempotently(
@@ -140,20 +161,43 @@ def test_scrape_and_store_uses_sql_store_idempotently(
         int,
         Instrument,
     )
+    missing_primary_key_store = AsOfStore.from_sql(
+        "sqlite:///:memory:",
+        "ib_instrument_missing_id_versions",
+        datetime,
+        Instrument,
+        NoneType,
+    )
     monkeypatch.setattr(
         ib_scraper,
         "scrape_instruments",
-        lambda *args, **kwargs: iter([_instrument(7, "SQL")]),
+        lambda *args, **kwargs: iter(
+            [_instrument(7, "SQL"), _instrument(None, "NO-CONID")]
+        ),
     )
     try:
-        first = ib_scraper.scrape_and_store_instruments(store)
-        second = ib_scraper.scrape_and_store_instruments(store)
+        first = ib_scraper.scrape_and_store_instruments(
+            store,
+            missing_primary_key_store=missing_primary_key_store,
+        )
+        second = ib_scraper.scrape_and_store_instruments(
+            store,
+            missing_primary_key_store=missing_primary_key_store,
+        )
 
-        assert first.new == 1
-        assert second.unchanged == 1
+        assert first.new == 2
+        assert second.unchanged == 2
+        assert second.new == 0
+        assert second.missing_primary_key == 1
         assert store.get(second.as_of, 7) == _instrument(7, "SQL")
+        assert missing_primary_key_store.put(
+            second.as_of,
+            _instrument(None, "NO-CONID"),
+            None,
+        ) is False
     finally:
         store.close()
+        missing_primary_key_store.close()
 
 
 def test_cli_wires_filters_progress_and_closes_store(
@@ -194,6 +238,8 @@ def test_cli_wires_filters_progress_and_closes_store(
             "sqlite:///:memory:",
             "--table-name",
             "instruments",
+            "--missing-primary-key-table-name",
+            "instruments_missing",
             "--product-type",
             "STK",
             "--start-page-number",
@@ -212,8 +258,18 @@ def test_cli_wires_filters_progress_and_closes_store(
     )
 
     assert result == 0
-    assert created == [("sqlite:///:memory:", "instruments", datetime, int, Instrument)]
+    assert created == [
+        ("sqlite:///:memory:", "instruments", datetime, int, Instrument),
+        (
+            "sqlite:///:memory:",
+            "instruments_missing",
+            datetime,
+            Instrument,
+            NoneType,
+        ),
+    ]
     assert captured["product_type"] == ["STK"]
+    assert captured["missing_primary_key_store"] is store
     assert captured["start_page_number"] == 3
     assert captured["end_page_number"] == 7
     assert captured["product_country"] == ["US"]
@@ -226,6 +282,38 @@ def test_cli_wires_filters_progress_and_closes_store(
     assert "Scrape complete: processed=1, new=1" in stderr
 
 
+def test_cli_uses_default_instrument_template_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeStore:
+        def close(self) -> None:
+            pass
+
+    created: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        AsOfStore,
+        "from_sql",
+        classmethod(lambda cls, *args: created.append(args) or FakeStore()),
+    )
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_and_store_instruments",
+        lambda store, **kwargs: ib_scraper.ScrapeReport(
+            as_of=datetime(2026, 1, 1, tzinfo=UTC)
+        ),
+    )
+
+    ib_scraper.main(["scrape-instruments", "--sql-uri", "sqlite:///:memory:"])
+
+    assert created[1] == (
+        "sqlite:///:memory:",
+        "ib_instrument_templates",
+        datetime,
+        Instrument,
+        NoneType,
+    )
+
+
 def test_cli_rejects_nonpositive_progress_interval() -> None:
     with pytest.raises(ValueError, match="--progress-every"):
         ib_scraper.main(
@@ -235,6 +323,21 @@ def test_cli_rejects_nonpositive_progress_interval() -> None:
                 "sqlite:///:memory:",
                 "--progress-every",
                 "0",
+            ]
+        )
+
+
+def test_cli_rejects_same_instrument_tables() -> None:
+    with pytest.raises(ValueError, match="table-name.*must differ"):
+        ib_scraper.main(
+            [
+                "scrape-instruments",
+                "--sql-uri",
+                "sqlite:///:memory:",
+                "--table-name",
+                "same",
+                "--missing-primary-key-table-name",
+                "same",
             ]
         )
 
@@ -323,6 +426,16 @@ def test_exchange_primary_key_and_persistence(monkeypatch: pytest.MonkeyPatch) -
     value = store.get(changed.as_of, exchange.primary_key)
     assert value is not None
     assert value.name == "Updated"
+
+
+def test_memory_store_accepts_unhashable_instrument_keys() -> None:
+    store = AsOfStore.from_memory()
+    instrument = _instrument(None, "NO-ID")
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+
+    assert store.put(timestamp, instrument, None) is True
+    assert store.get(timestamp, _instrument(None, "NO-ID")) is None
+    assert store.put(datetime(2026, 1, 2, tzinfo=UTC), instrument, None) is False
 
 
 def test_async_exchange_scraper_stores_sql_tuple_key(

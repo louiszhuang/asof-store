@@ -14,11 +14,33 @@ class MemoryBackend[Timestamp: SupportsAllComparisons, Key, Value](
 
     def __init__(self) -> None:
         self._versions: dict[Key, tuple[list[Timestamp], list[Value]]] = {}
+        self._unhashable_versions: list[
+            tuple[Key, tuple[list[Timestamp], list[Value]]]
+        ] = []
+
+    def _get_versions(self, key: Key) -> tuple[list[Timestamp], list[Value]] | None:
+        try:
+            hash(key)
+        except TypeError:
+            return next(
+                (
+                    versions
+                    for stored_key, versions in self._unhashable_versions
+                    if stored_key == key
+                ),
+                None,
+            )
+        return self._versions.get(key)
 
     def put(self, as_of: Timestamp, key: Key, value: Value) -> bool:
-        versions = self._versions.get(key)
+        versions = self._get_versions(key)
         if versions is None:
-            self._versions[key] = ([as_of], [value])
+            try:
+                hash(key)
+            except TypeError:
+                self._unhashable_versions.append((key, ([as_of], [value])))
+            else:
+                self._versions[key] = ([as_of], [value])
             return True
 
         timestamps, values = versions
@@ -38,7 +60,7 @@ class MemoryBackend[Timestamp: SupportsAllComparisons, Key, Value](
         return True
 
     def get(self, as_of: Timestamp, key: Key) -> Value | None:
-        versions = self._versions.get(key)
+        versions = self._get_versions(key)
         if versions is None:
             return None
 
