@@ -100,7 +100,8 @@ The API returns Pydantic models: `ExchangeResponse`, `InstrumentSummaryItem`,
 to the format expected by IB. Instrument models allow additional IB fields so
 new or product-specific response fields are retained. `Instrument.conid` is
 the IB contract ID and is marked as the primary key; some IB product types omit
-it, in which case `Instrument.primary_key` returns `None`.
+it, in which case `Instrument.primary_key` returns `None`. Exchanges use the
+composite primary key `(id, country_code)`.
 
 ```python
 from asof_store.ib import get_exchanges, scrape_instruments
@@ -176,7 +177,7 @@ Install the scraper and SQL extras, then run the explicit scraper command:
 
 ```powershell
 uv sync --extra scraper --extra sql-sqlite
-uv run asof-store scrape-ib --sql-uri "sqlite:///ib-instruments.db"
+uv run ass scrape-instruments --sql-uri "sqlite:///ib-instruments.db"
 ```
 
 Use `--sql-uri` with `--table-name` (default `ib_instruments`) to choose the
@@ -190,10 +191,22 @@ field-level JSON diffs for changed instruments. Progress is reported every
 final summary reports processed, new, changed, unchanged, and skipped
 instruments. Records without an IB `conid` are skipped and counted.
 
+Scrape and store the exchange catalogue with:
+
+```powershell
+uv run ass scrape-exchanges --sql-uri "sqlite:///ib-exchanges.db"
+```
+
+Exchanges use `(id, country_code)` as their composite primary key. The exchange
+scraper also supports `--print-new`, `--print-changes`, and `--progress-every`.
+
 The Python API provides `scrape_and_store_instruments(store, ...)` and
 `async_scrape_and_store_instruments(store, ...)`. Both accept an existing
 `AsOfStore[datetime, int, Instrument]` and return a `ScrapeReport`. Pass
 `start_page_number` to either function to resume a single-product-type scrape.
+Use `scrape_and_store_exchanges(store, ...)` or
+`async_scrape_and_store_exchanges(store, ...)` for exchanges, with an
+`AsOfStore[datetime, tuple[str, str], Exchange]`.
 
 ## Publishing
 

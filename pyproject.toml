@@ -20,7 +20,7 @@ scraper = ["pydantic>=2.0", "zapros>=0.20.0"]
 dev = ["pytest>=9"]
 
 [project.scripts]
-asof-store = "asof_store:main"
+ass = "asof_store:main"
 
 [tool.pytest.ini_options]
 markers = ["integration: tests that depend on live external services"]

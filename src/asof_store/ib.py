@@ -11,6 +11,7 @@ except ImportError as exc:
     ) from exc
 
 from .ib_models import (
+    Exchange,
     ExchangeResponse,
     Instrument,
     InstrumentSummaryItem,
@@ -164,6 +165,26 @@ async def get_exchanges_async(
             timeout=timeout,
         )
     return ExchangeResponse.model_validate(result)
+
+
+def scrape_exchanges(
+    client: Any | None = None,
+    *,
+    timeout: float = 30,
+) -> Generator[Exchange]:
+    """Yield IB exchanges."""
+    yield from get_exchanges(client, timeout=timeout).exchanges
+
+
+async def scrape_exchanges_async(
+    client: Any | None = None,
+    *,
+    timeout: float = 30,
+) -> AsyncGenerator[Exchange]:
+    """Asynchronously yield IB exchanges."""
+    response = await get_exchanges_async(client, timeout=timeout)
+    for exchange in response.exchanges:
+        yield exchange
 
 
 def get_instrument_summary(

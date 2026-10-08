@@ -13,10 +13,13 @@ from asof_store.ib import (
     get_instrument_summary_async,
     get_products_by_filters,
     get_products_by_filters_async,
+    scrape_exchanges,
+    scrape_exchanges_async,
     scrape_instruments,
     scrape_instruments_async,
 )
 from asof_store.ib_models import (
+    Exchange,
     ExchangeResponse,
     Instrument,
     InstrumentSummaryItem,
@@ -86,6 +89,39 @@ def test_get_exchanges_calls_ib_endpoint_directly() -> None:
     assert client.requests == [("GET", _EXCHANGES_URL, {"timeouts": {"total": 12}})]
 
 
+def test_scrape_exchanges_yields_models() -> None:
+    body = {
+        "exchanges": [
+            {
+                "id": "LSE",
+                "name": "London Stock Exchange",
+                "country": "United Kingdom",
+                "region": "Europe",
+                "assets": "Stocks",
+                "country_code": "GB",
+            }
+        ],
+        "productTypeCount": {},
+        "productCount": 1,
+    }
+
+    exchanges = list(
+        scrape_exchanges(FakeClient(lambda method, url, payload: FakeResponse(body)))
+    )
+
+    assert exchanges == [
+        Exchange(
+            id="LSE",
+            name="London Stock Exchange",
+            country="United Kingdom",
+            region="Europe",
+            assets="Stocks",
+            country_code="GB",
+        )
+    ]
+    assert exchanges[0].primary_key == ("LSE", "GB")
+
+
 def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
     async def exercise() -> None:
         exchanges = {
@@ -106,6 +142,29 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
         )
 
         exchange_result = await get_exchanges_async(client, timeout=12)
+        exchange_items = [
+            exchange
+            async for exchange in scrape_exchanges_async(
+                AsyncFakeClient(
+                    lambda method, url, payload: FakeResponse(
+                        {
+                            "exchanges": [
+                                {
+                                    "id": "LSE",
+                                    "name": "London Stock Exchange",
+                                    "country": "United Kingdom",
+                                    "region": "Europe",
+                                    "assets": "Stocks",
+                                    "country_code": "GB",
+                                }
+                            ],
+                            "productTypeCount": {},
+                            "productCount": 1,
+                        }
+                    )
+                )
+            )
+        ]
         summary_result = await get_instrument_summary_async(client)
         product_result = await get_products_by_filters_async(
             "STK",
@@ -120,6 +179,7 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
         assert isinstance(product_result, ProductsResponse)
         assert product_result.products[0].symbol == "ABC"
         assert exchange_result.product_count == 0
+        assert exchange_items[0].primary_key == ("LSE", "GB")
         assert [request[1] for request in client.requests] == [
             _EXCHANGES_URL,
             _SUMMARY_URL,

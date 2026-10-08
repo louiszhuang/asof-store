@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from asof_store import AsOfStore, ib_scraper
-from asof_store.ib_models import Instrument
+from asof_store.ib_models import Exchange, Instrument
 
 
 def _instrument(
@@ -17,6 +17,24 @@ def _instrument(
 ) -> Instrument:
     return Instrument.model_validate(
         {"conid": conid, "symbol": symbol, "type": "STK", **extra}
+    )
+
+
+def _exchange(
+    exchange_id: str,
+    country_code: str,
+    **extra: Any,
+) -> Exchange:
+    return Exchange.model_validate(
+        {
+            "id": exchange_id,
+            "country": "United Kingdom",
+            "name": f"{exchange_id} Market",
+            "region": "Europe",
+            "assets": "Stocks",
+            "country_code": country_code,
+            **extra,
+        }
     )
 
 
@@ -171,7 +189,7 @@ def test_cli_wires_filters_progress_and_closes_store(
 
     result = ib_scraper.main(
         [
-            "scrape-ib",
+            "scrape-instruments",
             "--sql-uri",
             "sqlite:///:memory:",
             "--table-name",
@@ -192,9 +210,7 @@ def test_cli_wires_filters_progress_and_closes_store(
     )
 
     assert result == 0
-    assert created == [
-        ("sqlite:///:memory:", "instruments", datetime, int, Instrument)
-    ]
+    assert created == [("sqlite:///:memory:", "instruments", datetime, int, Instrument)]
     assert captured["product_type"] == ["STK"]
     assert captured["start_page_number"] == 3
     assert captured["product_country"] == ["US"]
@@ -210,7 +226,13 @@ def test_cli_wires_filters_progress_and_closes_store(
 def test_cli_rejects_nonpositive_progress_interval() -> None:
     with pytest.raises(ValueError, match="--progress-every"):
         ib_scraper.main(
-            ["scrape-ib", "--sql-uri", "sqlite:///:memory:", "--progress-every", "0"]
+            [
+                "scrape-instruments",
+                "--sql-uri",
+                "sqlite:///:memory:",
+                "--progress-every",
+                "0",
+            ]
         )
 
 
@@ -240,4 +262,111 @@ def test_cli_validates_start_page_number(
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        ib_scraper.main(["scrape-ib", "--sql-uri", "sqlite:///:memory:", *extra_args])
+        ib_scraper.main(
+            ["scrape-instruments", "--sql-uri", "sqlite:///:memory:", *extra_args]
+        )
+
+
+def test_exchange_primary_key_and_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = AsOfStore.from_memory()
+    output = StringIO()
+    exchange = _exchange("LSE", "GB")
+    same_id_different_country_code = _exchange("LSE", "DE")
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_exchanges",
+        lambda *args, **kwargs: [exchange, same_id_different_country_code],
+    )
+
+    report = ib_scraper.scrape_and_store_exchanges(
+        store,
+        print_new=True,
+        output=output,
+    )
+
+    assert exchange.primary_key == ("LSE", "GB")
+    assert report.new == 2
+    assert store.get(report.as_of, exchange.primary_key) == exchange
+    assert (
+        store.get(report.as_of, same_id_different_country_code.primary_key)
+        == same_id_different_country_code
+    )
+    printed_exchanges = [
+        json.loads(line)["exchange"]["country_code"]
+        for line in output.getvalue().splitlines()
+    ]
+    assert printed_exchanges == ["GB", "DE"]
+
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_exchanges",
+        lambda *args, **kwargs: [_exchange("LSE", "GB", name="Updated")],
+    )
+    changed = ib_scraper.scrape_and_store_exchanges(store, print_changes=True)
+    assert changed.changed == 1
+    value = store.get(changed.as_of, exchange.primary_key)
+    assert value is not None
+    assert value.name == "Updated"
+
+
+def test_async_exchange_scraper_stores_sql_tuple_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("sqlalchemy")
+    store = AsOfStore.from_sql(
+        "sqlite:///:memory:",
+        "ib_exchange_versions",
+        datetime,
+        tuple,
+        Exchange,
+    )
+    exchange = _exchange("LSE", "GB")
+
+    async def fake_scrape(*args: Any, **kwargs: Any):
+        yield exchange
+
+    monkeypatch.setattr(ib_scraper, "scrape_exchanges_async", fake_scrape)
+
+    try:
+        report = asyncio.run(ib_scraper.async_scrape_and_store_exchanges(store))
+        assert report.new == 1
+        assert store.get(report.as_of, ("LSE", "GB")) == exchange
+    finally:
+        store.close()
+
+
+def test_exchange_cli_uses_tuple_key_and_model(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    store = FakeStore()
+    created: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        AsOfStore,
+        "from_sql",
+        classmethod(lambda cls, *args: created.append(args) or store),
+    )
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_and_store_exchanges",
+        lambda store_arg, **kwargs: ib_scraper.ScrapeReport(
+            as_of=datetime(2026, 1, 1, tzinfo=UTC),
+            processed=1,
+            new=1,
+        ),
+    )
+
+    result = ib_scraper.main(["scrape-exchanges", "--sql-uri", "sqlite:///:memory:"])
+
+    assert result == 0
+    assert created == [
+        ("sqlite:///:memory:", "ib_exchanges", datetime, tuple, Exchange)
+    ]
+    assert store.closed is True
+    assert "Scrape complete: processed=1, new=1" in capsys.readouterr().err

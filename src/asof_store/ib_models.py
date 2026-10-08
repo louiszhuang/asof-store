@@ -89,7 +89,11 @@ class ProductsByFiltersRequest(IBRequest):
 
 
 class Exchange(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        json_schema_extra={"primary_key": ["id", "country_code"]},
+    )
 
     id: str
     name: str
@@ -97,6 +101,11 @@ class Exchange(BaseModel):
     region: str
     assets: str
     country_code: str
+
+    @property
+    def primary_key(self) -> tuple[str, str]:
+        """Return the exchange ID and country code as its composite key."""
+        return self.id, self.country_code
 
 
 class ExchangeResponse(BaseModel):
