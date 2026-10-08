@@ -4,7 +4,7 @@ requires-python = ">=3.14"
 
 [[package]]
 name = "asof-store"
-version = "0.2.0"
+version = "0.1.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
@@ -25,9 +25,9 @@ zapros = [
 [package.metadata]
 requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'sql-postgres'", specifier = ">=3.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "sqlalchemy", marker = "extra == 'sql-postgres'", specifier = ">=2.1" },
-    { name = "sqlalchemy", marker = "extra == 'sql-sqlite'", specifier = ">=2.1" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "sqlalchemy", marker = "extra == 'sql-postgres'", specifier = ">=2.0" },
+    { name = "sqlalchemy", marker = "extra == 'sql-sqlite'", specifier = ">=2.0" },
     { name = "zapros", marker = "extra == 'zapros'", specifier = ">=0.20.0" },
 ]
 provides-extras = ["sql-sqlite", "sql-postgres", "zapros", "dev"]

@@ -15,9 +15,9 @@ classifiers = [
 
 [project.optional-dependencies]
 sql-sqlite = ["sqlalchemy>=2.1"]
-sql-postgres = ["sqlalchemy>=2.1", "psycopg[binary]>=3.2"]
+sql-postgres = ["sqlalchemy>=2.1", "psycopg[binary]>=3.3"]
 zapros = ["zapros>=0.20.0"]
-dev = ["pytest>=8"]
+dev = ["pytest>=9"]
 
 [project.scripts]
 asof-store = "asof_store:main"

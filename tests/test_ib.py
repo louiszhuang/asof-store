@@ -172,7 +172,9 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         product_type = payload["productType"][0]
         page_number = payload["pageNumber"]
         total_count = next(
-            item["totalCount"] for item in summary if item["productType"] == product_type
+            item["totalCount"]
+            for item in summary
+            if item["productType"] == product_type
         )
         count = min(100, total_count - (page_number - 1) * 100)
         return FakeResponse(
@@ -228,8 +230,7 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
 
         client = AsyncFakeClient(respond)
         products = [
-            product
-            async for product in scrape_instruments_async(client, page_size=100)
+            product async for product in scrape_instruments_async(client, page_size=100)
         ]
 
         assert len(products) == 102
@@ -244,7 +245,12 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
 
 @pytest.mark.parametrize(
     ("product_type", "page_number", "page_size"),
-    [("", 1, 100), ("STK", 0, 100), ("STK", 1, 501), ("STK", 1, 150)],
+    [
+        ("", 1, 100),
+        ("STK", 0, 100),
+        ("STK", 1, 501),
+        ("STK", 1, 150),
+    ],
 )
 def test_get_products_rejects_invalid_pagination(
     product_type: str,

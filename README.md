@@ -74,59 +74,6 @@ arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
 supported because PostgreSQL does not provide ordering comparisons for them.
 SQL stores index `(key, timestamp)` for efficient latest-version lookups.
 
-## Zapros middleware (optional)
-
-Install the Zapros integration extra:
-
-```sh
-uv add "asof-store[zapros]"
-```
-
-The middleware supports synchronous and asynchronous Zapros clients. In
-`building` mode it forwards requests to the network and records non-empty JSON
-objects from successful (2xx) responses, keyed by the exact URL and request body.
-The version timestamp is the time the response is recorded. In `as_of` mode it
-returns the latest saved JSON response at or before the supplied timezone-aware
-timestamp, without calling the network handler. A missing match raises
-Zapros's `UnhandledRequestError`.
-
-```python
-from datetime import UTC, datetime
-
-from asof_store import AsOfStore
-from asof_store.zapros import ZaprosAsOfMiddleware
-from zapros import Client, StdNetworkHandler
-
-store = AsOfStore.from_memory()
-
-with Client(
-    handler=ZaprosAsOfMiddleware(
-        StdNetworkHandler(),
-        store,
-        mode="building",
-    )
-) as client:
-    client.get("https://api.example.com/items")
-
-with Client(
-    handler=ZaprosAsOfMiddleware(
-        None,
-        store,
-        mode="as_of",
-        as_of=datetime.now(UTC),
-    )
-) as client:
-    response = client.get("https://api.example.com/items")
-    print(response.json)
-```
-
-`RequestKey` is a hashable dictionary with `uri` and `request_body` fields; the
-request body is parsed from JSON (or `None` when absent). The middleware stores
-non-empty JSON objects as response values.
-
-For SQL persistence, create a store with timestamp type `datetime`, key type
-`RequestKey`, and value type `dict`.
-
 ## Interactive Brokers data (optional)
 
 Install the Zapros extra to query the Interactive Brokers UK web API:
@@ -135,12 +82,13 @@ Install the Zapros extra to query the Interactive Brokers UK web API:
 uv add "asof-store[zapros]"
 ```
 
-The functions in `asof_store.ib` create and close a Zapros client when one is
-not supplied. Pass an existing client to reuse its connection. `get_exchanges`
-returns the exchange catalogue, `get_instrument_summary` returns product counts
-by type, and `get_products_by_filters` fetches a requested page. To fetch all
-instruments, `scrape_instruments` reads the summary and yields products across
-all reported types and pages:
+Functions in `asof_store.ib` create and close a Zapros client when one is not
+provided. Pass an existing sync or async client to reuse its connection.
+`get_exchanges` fetches the exchange catalogue, while `get_instrument_summary`
+fetches product counts by type. `get_products_by_filters` fetches one page, and
+`scrape_instruments` fetches every reported page and yields instruments.
+Async equivalents have an `_async` suffix; `scrape_instruments_async` is an
+async iterator.
 
 ```python
 from asof_store.ib import get_exchanges, scrape_instruments
@@ -149,9 +97,6 @@ exchanges = get_exchanges()
 for instrument in scrape_instruments(page_size=500):
     print(instrument)
 ```
-
-Async equivalents are available for all functions with an `_async` suffix.
-`scrape_instruments_async` is an async iterator:
 
 ```python
 import asyncio
@@ -168,9 +113,8 @@ async def main():
 asyncio.run(main())
 ```
 
-These calls access the live IB API and are not cached or persisted. The scraper
-requests pages of up to 500 products by default; use `page_size` to reduce that
-number.
+Requests use the live IB API and are not cached or persisted. Product page
+sizes must be 100, 200, 300, 400, or 500.
 
 ## Development
 

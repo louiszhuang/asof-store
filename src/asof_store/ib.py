@@ -1,6 +1,5 @@
 from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from math import ceil
 from typing import Any
 
 try:
@@ -101,7 +100,7 @@ def _validate_timeout(timeout: float) -> None:
 
 def _validate_page_size(page_size: int) -> None:
     if not 100 <= page_size <= 500 or page_size % 100 != 0:
-        raise ValueError("page_size must be between 100, 200, 300, 400, or 500")
+        raise ValueError("page_size must be 100, 200, 300, 400, or 500")
 
 
 def _product_totals(summary: list[dict[str, Any]]) -> dict[str, int]:
@@ -136,7 +135,7 @@ def _validated_products(
             f"{page_number}: expected {expected_count}, received {len(products)}"
         )
     if any(not isinstance(product, dict) for product in products):
-        raise ValueError(
+        raise TypeError(
             f"IB products must be objects for {product_type} page {page_number}"
         )
     return products
@@ -329,7 +328,7 @@ def scrape_instruments(
             timeout=timeout,
         )
         for product_type, total_count in _product_totals(summary).items():
-            page_count = ceil(total_count / page_size)
+            page_count = (total_count + page_size - 1) // page_size
             for page_number in range(1, page_count + 1):
                 page = get_products_by_filters(
                     product_type,
@@ -343,13 +342,12 @@ def scrape_instruments(
                     page_size,
                     total_count - (page_number - 1) * page_size,
                 )
-                products = _validated_products(
+                yield from _validated_products(
                     page["products"],
                     product_type=product_type,
                     page_number=page_number,
                     expected_count=expected_count,
                 )
-                yield from products
 
 
 async def scrape_instruments_async(
@@ -370,7 +368,7 @@ async def scrape_instruments_async(
             timeout=timeout,
         )
         for product_type, total_count in _product_totals(summary).items():
-            page_count = ceil(total_count / page_size)
+            page_count = (total_count + page_size - 1) // page_size
             for page_number in range(1, page_count + 1):
                 page = await get_products_by_filters_async(
                     product_type,
@@ -384,11 +382,10 @@ async def scrape_instruments_async(
                     page_size,
                     total_count - (page_number - 1) * page_size,
                 )
-                products = _validated_products(
+                for product in _validated_products(
                     page["products"],
                     product_type=product_type,
                     page_number=page_number,
                     expected_count=expected_count,
-                )
-                for product in products:
+                ):
                     yield product
