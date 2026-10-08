@@ -25,7 +25,6 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.engine import Engine
 from sqlalchemy.sql.type_api import TypeEngine
 
 from ._abc import AsOfStoreABC
@@ -43,10 +42,6 @@ _SORTABLE_TIMESTAMP_TYPES = {
     Decimal,
     UUID,
 }
-
-
-def _create_engine(sql_uri: str) -> Engine:
-    return create_engine(sql_uri)
 
 
 def _sql_type(python_type: type[Any]) -> TypeEngine[Any]:
@@ -144,14 +139,16 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
 
         if timestamp_type not in _SORTABLE_TIMESTAMP_TYPES:
             supported_types = ", ".join(
-                sorted(python_type.__name__ for python_type in _SORTABLE_TIMESTAMP_TYPES)
+                sorted(
+                    python_type.__name__ for python_type in _SORTABLE_TIMESTAMP_TYPES
+                )
             )
             raise TypeError(
                 f"timestamp_type must map to an indexable, sortable SQL scalar "
                 f"type ({supported_types}); got {timestamp_type.__name__}"
             )
 
-        self._engine = _create_engine(sql_uri)
+        self._engine = create_engine(sql_uri)
         if len(table_name) > self._engine.dialect.max_identifier_length:
             self._engine.dispose()
             raise ValueError(
