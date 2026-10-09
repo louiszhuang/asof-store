@@ -53,6 +53,7 @@ def test_scrape_and_store_classifies_records_and_prints_details(
             [
                 _instrument(1, "FIRST"),
                 _instrument(None, "NO-ID"),
+                _instrument(None, "NO-ID"),
                 _instrument(2, "UNCHANGED"),
             ]
         ),
@@ -66,8 +67,14 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         on_progress=progress.append,
     )
 
-    assert (first.processed, first.new, first.changed, first.unchanged) == (3, 3, 0, 0)
-    assert first.missing_primary_key == 1
+    assert (
+        first.processed,
+        first.new_with_conid,
+        first.changed_with_conid,
+        first.unchanged_with_conid,
+        first.new_without_conid,
+        first.unchanged_without_conid,
+    ) == (4, 2, 0, 0, 1, 1)
     assert missing_primary_key_store.get(
         first.as_of,
         _instrument(None, "NO-ID"),
@@ -97,12 +104,14 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         output=output,
     )
 
-    assert (second.processed, second.new, second.changed, second.unchanged) == (
-        3,
-        1,
-        1,
-        1,
-    )
+    assert (
+        second.processed,
+        second.new_with_conid,
+        second.changed_with_conid,
+        second.unchanged_with_conid,
+        second.new_without_conid,
+        second.unchanged_without_conid,
+    ) == (3, 1, 1, 1, 0, 0)
     assert store.get(second.as_of, 1) == _instrument(
         1,
         "FIRST-UPDATED",
@@ -138,8 +147,8 @@ def test_async_scrape_and_store_saves_instrument_models(
     )
 
     assert report.processed == 2
-    assert report.new == 2
-    assert report.missing_primary_key == 1
+    assert report.new_with_conid == 1
+    assert report.new_without_conid == 1
     assert store.get(report.as_of, 42) == _instrument(42, "ASYNC")
     assert (
         missing_primary_key_store.get(
@@ -185,10 +194,8 @@ def test_scrape_and_store_uses_sql_store_idempotently(
             missing_primary_key_store=missing_primary_key_store,
         )
 
-        assert first.new == 2
-        assert second.unchanged == 2
-        assert second.new == 0
-        assert second.missing_primary_key == 1
+        assert first.new_with_conid == first.new_without_conid == 1
+        assert second.unchanged_with_conid == second.unchanged_without_conid == 1
         assert store.get(second.as_of, 7) == _instrument(7, "SQL")
         assert missing_primary_key_store.put(
             second.as_of,
@@ -219,12 +226,14 @@ def test_cli_wires_filters_progress_and_closes_store(
     )
     captured: dict[str, Any] = {}
 
-    def fake_scrape(store_arg: Any, **kwargs: Any) -> ib_scraper.ScrapeReport:
+    def fake_scrape(
+        store_arg: Any,
+        **kwargs: Any,
+    ) -> ib_scraper.InstrumentScrapeReport:
         captured.update(kwargs)
-        report = ib_scraper.ScrapeReport(
+        report = ib_scraper.InstrumentScrapeReport(
             as_of=datetime(2026, 1, 1, tzinfo=UTC),
-            processed=1,
-            new=1,
+            new_with_conid=1,
         )
         kwargs["on_progress"](report)
         return report
@@ -278,8 +287,16 @@ def test_cli_wires_filters_progress_and_closes_store(
     assert captured["print_changes"] is True
     assert store.closed is True
     stderr = capsys.readouterr().err
-    assert "Processed 1: new=1" in stderr
-    assert "Scrape complete: processed=1, new=1" in stderr
+    assert (
+        "Processed 1: new_with_conid=1, changed_with_conid=0, "
+        "unchanged_with_conid=0, new_without_conid=0, "
+        "unchanged_without_conid=0"
+    ) in stderr
+    assert (
+        "Scrape complete: processed=1, new_with_conid=1, "
+        "changed_with_conid=0, unchanged_with_conid=0, "
+        "new_without_conid=0, unchanged_without_conid=0"
+    ) in stderr
 
 
 def test_cli_uses_default_instrument_template_table(
@@ -298,7 +315,7 @@ def test_cli_uses_default_instrument_template_table(
     monkeypatch.setattr(
         ib_scraper,
         "scrape_and_store_instruments",
-        lambda store, **kwargs: ib_scraper.ScrapeReport(
+        lambda store, **kwargs: ib_scraper.InstrumentScrapeReport(
             as_of=datetime(2026, 1, 1, tzinfo=UTC)
         ),
     )

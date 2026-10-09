@@ -190,10 +190,11 @@ sets an inclusive last page and also requires exactly one `--product-type`.
 `--print-new` prints each new instrument as JSON, and `--print-changes` prints
 field-level JSON diffs for changed instruments. Progress is reported every
 1,000 instruments by default; `--progress-every` changes that interval. The
-final summary reports processed, new, changed, unchanged, and the number
-without primary keys. Instruments without an IB `conid` are stored in a second
-table, `ib_instrument_templates` by default, keyed by the complete
-`Instrument` model; choose another table with
+final summary reports processed as the sum of five disjoint counts:
+`new_with_conid`, `changed_with_conid`, `unchanged_with_conid`,
+`new_without_conid`, and `unchanged_without_conid`. Instruments without an IB
+`conid` are stored in a second table, `ib_instrument_templates` by default,
+keyed by the complete `Instrument` model; choose another table with
 `--missing-primary-key-table-name`.
 
 Scrape and store the exchange catalogue with:
@@ -208,7 +209,9 @@ scraper also supports `--print-new`, `--print-changes`, and `--progress-every`.
 The Python API provides `scrape_and_store_instruments(store, ...)` and
 `async_scrape_and_store_instruments(store, ...)`. Both accept an instrument
 store, plus a `missing_primary_key_store` of type
-`AsOfStore[datetime, Instrument, NoneType]`, and return a `ScrapeReport`.
+`AsOfStore[datetime, Instrument, NoneType]`, and return an
+`InstrumentScrapeReport` whose `processed` property is the sum of the five
+disjoint categories above.
 Pass `start_page_number` and `end_page_number` to resume or limit a
 single-product-type scrape.
 Use `scrape_and_store_exchanges(store, ...)` or

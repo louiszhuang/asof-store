@@ -20,7 +20,6 @@ from .ib_models import Exchange, Instrument, NewProduct
 type InstrumentStore = AsOfStoreABC[datetime, int, Instrument]
 type MissingPrimaryKeyStore = AsOfStoreABC[datetime, Instrument, NoneType]
 type ExchangeStore = AsOfStoreABC[datetime, tuple[str, str], Exchange]
-type ProgressCallback = Callable[["ScrapeReport"], None]
 
 
 @dataclass
@@ -30,7 +29,30 @@ class ScrapeReport:
     new: int = 0
     changed: int = 0
     unchanged: int = 0
-    missing_primary_key: int = 0
+
+
+@dataclass
+class InstrumentScrapeReport:
+    as_of: datetime
+    new_with_conid: int = 0
+    changed_with_conid: int = 0
+    unchanged_with_conid: int = 0
+    new_without_conid: int = 0
+    unchanged_without_conid: int = 0
+
+    @property
+    def processed(self) -> int:
+        return (
+            self.new_with_conid
+            + self.changed_with_conid
+            + self.unchanged_with_conid
+            + self.new_without_conid
+            + self.unchanged_without_conid
+        )
+
+
+type ProgressReport = ScrapeReport | InstrumentScrapeReport
+type ProgressCallback = Callable[[ProgressReport], None]
 
 
 def _instrument_json(instrument: Instrument) -> dict[str, object]:
@@ -112,46 +134,44 @@ def _record_instrument(
     store: InstrumentStore,
     missing_primary_key_store: MissingPrimaryKeyStore,
     instrument: Instrument,
-    report: ScrapeReport,
+    report: InstrumentScrapeReport,
     *,
     print_new: bool,
     print_changes: bool,
     output: TextIO,
 ) -> None:
-    report.processed += 1
     primary_key = instrument.primary_key
     if primary_key is None:
-        report.missing_primary_key += 1
         stored = missing_primary_key_store.put(report.as_of, instrument, None)
         if stored:
-            report.new += 1
+            report.new_without_conid += 1
             if print_new:
                 _print_json(
                     output,
                     {"event": "new", "instrument": _instrument_json(instrument)},
                 )
         else:
-            report.unchanged += 1
+            report.unchanged_without_conid += 1
         return
 
     current = _instrument_json(instrument)
     previous = store.get(report.as_of, primary_key)
     if previous is None:
         store.put(report.as_of, primary_key, instrument)
-        report.new += 1
+        report.new_with_conid += 1
         if print_new:
             _print_json(output, {"event": "new", "instrument": current})
         return
 
     changes = _instrument_diff(_instrument_json(previous), current)
     if not changes:
-        report.unchanged += 1
+        report.unchanged_with_conid += 1
         return
 
     timestamp = max(datetime.now(UTC), report.as_of + timedelta(microseconds=1))
     report.as_of = timestamp
     store.put(timestamp, primary_key, instrument)
-    report.changed += 1
+    report.changed_with_conid += 1
     if print_changes:
         _print_json(
             output,
@@ -180,9 +200,9 @@ def scrape_and_store_instruments(
     output: TextIO | None = None,
     on_progress: ProgressCallback | None = None,
     client: Any | None = None,
-) -> ScrapeReport:
+) -> InstrumentScrapeReport:
     """Fetch IB instruments, save changes by conid, and return run counts."""
-    report = ScrapeReport(as_of=datetime.now(UTC))
+    report = InstrumentScrapeReport(as_of=datetime.now(UTC))
     output = sys.stdout if output is None else output
     instruments = scrape_instruments(
         client,
@@ -227,9 +247,9 @@ async def async_scrape_and_store_instruments(
     output: TextIO | None = None,
     on_progress: ProgressCallback | None = None,
     client: Any | None = None,
-) -> ScrapeReport:
+) -> InstrumentScrapeReport:
     """Asynchronously fetch IB instruments and save changes by conid."""
-    report = ScrapeReport(as_of=datetime.now(UTC))
+    report = InstrumentScrapeReport(as_of=datetime.now(UTC))
     output = sys.stdout if output is None else output
     instruments: AsyncIterator[Instrument] = scrape_instruments_async(
         client,
@@ -360,13 +380,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_progress(report: ScrapeReport, output: TextIO) -> None:
-    print(
-        f"Processed {report.processed}: new={report.new}, "
-        f"changed={report.changed}, unchanged={report.unchanged}, "
-        f"missing_primary_key={report.missing_primary_key}",
-        file=output,
-    )
+def _print_progress(report: ProgressReport, output: TextIO) -> None:
+    print(f"Processed {report.processed}: {_summary_counts(report)}", file=output)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -427,7 +442,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
 
-        def report_progress(report: ScrapeReport) -> None:
+        def report_progress(report: ProgressReport) -> None:
             if report.processed % args.progress_every == 0:
                 _print_progress(report, sys.stderr)
 
@@ -462,10 +477,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_progress(result, sys.stderr)
         print(
             "Scrape complete: "
-            f"processed={result.processed}, new={result.new}, "
-            f"changed={result.changed}, unchanged={result.unchanged}, "
-            f"missing_primary_key={result.missing_primary_key}, "
-            f"as_of={result.as_of.isoformat()}",
+            f"processed={result.processed}, "
+            f"{_summary_counts(result)}, as_of={result.as_of.isoformat()}",
             file=sys.stderr,
         )
     finally:
@@ -473,6 +486,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         if missing_primary_key_store is not None:
             missing_primary_key_store.close()
     return 0
+
+
+def _summary_counts(report: ScrapeReport | InstrumentScrapeReport) -> str:
+    if isinstance(report, InstrumentScrapeReport):
+        return (
+            f"new_with_conid={report.new_with_conid}, "
+            f"changed_with_conid={report.changed_with_conid}, "
+            f"unchanged_with_conid={report.unchanged_with_conid}, "
+            f"new_without_conid={report.new_without_conid}, "
+            f"unchanged_without_conid={report.unchanged_without_conid}"
+        )
+    return (
+        f"new={report.new}, changed={report.changed}, "
+        f"unchanged={report.unchanged}"
+    )
 
 
 if __name__ == "__main__":
