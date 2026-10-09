@@ -159,8 +159,9 @@ are not cached or persisted. Product page sizes must be 100, 200, 300, 400, or
 500. Both instrument scrape iterators yield an `InstrumentScrapeSummary`
 tagged event first (`event == "summary"`, with `products` containing
 `InstrumentSummaryItem` values), before requesting product pages, followed by
-`Instrument` objects. The persistence API invokes `on_summary` with this event
-before its per-record `on_progress` callback.
+`Instrument` objects and a page-complete event after each page. The persistence
+API invokes `on_summary` before processing, then calls `on_progress` once for
+each completed page with that page's instrument ordinal range.
 
 ### Live integration tests
 
@@ -202,8 +203,10 @@ arguments filter the scrape; `--new-product` accepts `all`, `T`, or `F`.
 one `--product-type`; pages before it are not requested. `--end-page-number`
 sets an inclusive last page and also requires exactly one `--product-type`.
 `--print-new` prints each new instrument as JSON, and `--print-changes` prints
-field-level JSON diffs for changed instruments. Progress is reported every
-1,000 instruments by default; `--progress-every` changes that interval. The
+field-level JSON diffs for changed instruments. Progress is reported after
+every page by default; `--progress-every` changes the number of page reports
+between progress messages. Each message includes the product type and
+instrument ordinal range, calculated from the page number and page size. The
 final summary reports total and disjoint counts for new, changed, and unchanged
 instruments with primary keys, plus new and unchanged instruments without
 primary keys. Instruments without an IB `conid` are stored in a second

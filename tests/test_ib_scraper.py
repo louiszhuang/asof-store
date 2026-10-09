@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from asof_store import AsOfStore, ib_scraper
-from asof_store.ib import InstrumentScrapeSummary
+from asof_store.ib import InstrumentScrapePage, InstrumentScrapeSummary
 from asof_store.ib_models import Exchange, Instrument, InstrumentSummaryItem
 
 
@@ -60,6 +60,12 @@ def test_scrape_and_store_classifies_records_and_prints_details(
                 _instrument(1, "FIRST"),
                 _instrument(None, "NO-ID"),
                 _instrument(2, "UNCHANGED"),
+                InstrumentScrapePage(
+                    product_type="STK",
+                    page_number=1,
+                    page_size=500,
+                    instrument_count=3,
+                ),
             ]
         ),
     )
@@ -93,8 +99,10 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         )
         is False
     )
-    assert progress[-1] == first
-    assert callback_order == ["summary", "process", "process", "process"]
+    assert len(progress) == 1
+    assert progress[0].instrument_range == (1, 3)
+    assert progress[0].product_type == "STK"
+    assert callback_order == ["summary", "process"]
     assert store.get(first.as_of, 1) == _instrument(1, "FIRST")
     printed = [json.loads(line) for line in output.getvalue().splitlines() if line]
     assert len(printed) == 3
@@ -154,6 +162,12 @@ def test_async_scrape_and_store_saves_instrument_models(
         )
         yield _instrument(42, "ASYNC")
         yield _instrument(None, "MISSING")
+        yield InstrumentScrapePage(
+            product_type="STK",
+            page_number=3,
+            page_size=100,
+            instrument_count=2,
+        )
 
     monkeypatch.setattr(ib_scraper, "scrape_instruments_async", fake_scrape)
 
@@ -170,7 +184,7 @@ def test_async_scrape_and_store_saves_instrument_models(
     assert report.total == 2
     assert report.new_with_primary_key == 1
     assert report.new_without_primary_key == 1
-    assert callback_order == ["summary", "process", "process"]
+    assert callback_order == ["summary", "process"]
     assert store.get(report.as_of, 42) == _instrument(42, "ASYNC")
     assert (
         missing_primary_key_store.put(
@@ -261,6 +275,8 @@ def test_cli_wires_filters_progress_and_closes_store(
         report = ib_scraper.ScrapeReport(
             as_of=datetime(2026, 1, 1, tzinfo=UTC),
             new_with_primary_key=1,
+            product_type="STK",
+            instrument_range=(1001, 1500),
         )
         kwargs["on_summary"](
             InstrumentScrapeSummary(
@@ -319,9 +335,11 @@ def test_cli_wires_filters_progress_and_closes_store(
     assert captured["print_changes"] is True
     assert store.closed is True
     stderr = capsys.readouterr().err
-    assert "Total 1: new_with_primary_key=1" in stderr
+    assert "Progress instruments 1001-1500 (STK); total=1" in stderr
     assert "Scrape complete: total=1, new_with_primary_key=1" in stderr
-    assert stderr.index("Instrument summary: STK=25") < stderr.index("Total 1:")
+    assert stderr.index("Instrument summary: STK=25") < stderr.index(
+        "Progress instruments 1001-1500 (STK)"
+    )
 
 
 def test_cli_uses_default_instrument_template_table(

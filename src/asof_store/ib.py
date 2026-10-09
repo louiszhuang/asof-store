@@ -36,7 +36,16 @@ class InstrumentScrapeSummary:
     event: Literal["summary"] = "summary"
 
 
-type InstrumentScrapeItem = InstrumentScrapeSummary | Instrument
+@dataclass(frozen=True)
+class InstrumentScrapePage:
+    product_type: str
+    page_number: int
+    page_size: int
+    instrument_count: int
+    event: Literal["page_complete"] = "page_complete"
+
+
+type InstrumentScrapeItem = InstrumentScrapeSummary | Instrument | InstrumentScrapePage
 
 
 @contextmanager
@@ -404,6 +413,12 @@ def scrape_instruments(
                     page_number=page_number,
                     expected_count=expected_count,
                 )
+                yield InstrumentScrapePage(
+                    product_type=_product_type,
+                    page_number=page_number,
+                    page_size=page_size,
+                    instrument_count=expected_count,
+                )
 
 
 async def scrape_instruments_async(
@@ -474,3 +489,9 @@ async def scrape_instruments_async(
                     expected_count=expected_count,
                 ):
                     yield product
+                yield InstrumentScrapePage(
+                    product_type=_product_type,
+                    page_number=page_number,
+                    page_size=page_size,
+                    instrument_count=expected_count,
+                )

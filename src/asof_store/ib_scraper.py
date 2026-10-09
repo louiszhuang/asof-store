@@ -10,6 +10,7 @@ from typing import Any, TextIO
 from ._abc import AsOfStoreABC
 from ._store import AsOfStore
 from .ib import (
+    InstrumentScrapePage,
     InstrumentScrapeSummary,
     scrape_exchanges,
     scrape_exchanges_async,
@@ -34,6 +35,8 @@ class ScrapeReport:
     unchanged_with_primary_key: int = 0
     new_without_primary_key: int = 0
     unchanged_without_primary_key: int = 0
+    product_type: str | None = None
+    instrument_range: tuple[int, int] | None = None
 
     @property
     def total(self) -> int:
@@ -224,6 +227,19 @@ def scrape_and_store_instruments(
             if on_summary is not None:
                 on_summary(item)
             continue
+        if isinstance(item, InstrumentScrapePage):
+            if on_progress is not None:
+                first = (item.page_number - 1) * item.page_size + 1
+                page_report = replace(
+                    report,
+                    product_type=item.product_type,
+                    instrument_range=(
+                        first,
+                        first + item.instrument_count - 1,
+                    ),
+                )
+                on_progress(page_report)
+            continue
         _record_instrument(
             store,
             missing_primary_key_store,
@@ -233,8 +249,6 @@ def scrape_and_store_instruments(
             print_changes=print_changes,
             output=output,
         )
-        if on_progress is not None:
-            on_progress(replace(report))
     return report
 
 
@@ -260,7 +274,9 @@ async def async_scrape_and_store_instruments(
     """Asynchronously fetch IB instruments and save changes by conid."""
     report = ScrapeReport(as_of=datetime.now(UTC))
     output = sys.stdout if output is None else output
-    instruments: AsyncIterator[Instrument | InstrumentScrapeSummary] = (
+    instruments: AsyncIterator[
+        Instrument | InstrumentScrapeSummary | InstrumentScrapePage
+    ] = (
         scrape_instruments_async(
             client,
             domain=domain,
@@ -278,6 +294,19 @@ async def async_scrape_and_store_instruments(
             if on_summary is not None:
                 on_summary(item)
             continue
+        if isinstance(item, InstrumentScrapePage):
+            if on_progress is not None:
+                first = (item.page_number - 1) * item.page_size + 1
+                page_report = replace(
+                    report,
+                    product_type=item.product_type,
+                    instrument_range=(
+                        first,
+                        first + item.instrument_count - 1,
+                    ),
+                )
+                on_progress(page_report)
+            continue
         _record_instrument(
             store,
             missing_primary_key_store,
@@ -287,8 +316,6 @@ async def async_scrape_and_store_instruments(
             print_changes=print_changes,
             output=output,
         )
-        if on_progress is not None:
-            on_progress(replace(report))
     return report
 
 
@@ -370,7 +397,7 @@ def _build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--timeout", type=float, default=30)
         subparser.add_argument("--print-new", action="store_true")
         subparser.add_argument("--print-changes", action="store_true")
-        subparser.add_argument("--progress-every", type=int, default=1000)
+        subparser.add_argument("--progress-every", type=int, default=1)
 
     instruments_parser.add_argument(
         "--missing-primary-key-table-name",
@@ -405,8 +432,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _print_progress(report: ScrapeReport, output: TextIO) -> None:
+    instrument_range = (
+        "instruments "
+        f"{report.instrument_range[0]}-{report.instrument_range[1]} "
+        f"({report.product_type})"
+        if report.instrument_range is not None
+        else f"total {report.total}"
+    )
     print(
-        f"Total {report.total}: "
+        f"Progress {instrument_range}; total={report.total}: "
         f"new_with_primary_key={report.new_with_primary_key}, "
         f"changed_with_primary_key={report.changed_with_primary_key}, "
         f"unchanged_with_primary_key={report.unchanged_with_primary_key}, "
@@ -501,8 +535,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
 
+        progress_events = 0
+
         def report_progress(report: ScrapeReport) -> None:
-            if report.total % args.progress_every == 0:
+            nonlocal progress_events
+            progress_events += 1
+            if progress_events % args.progress_every == 0:
                 _print_progress(report, sys.stderr)
 
         if is_instruments:
@@ -538,7 +576,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print_changes=args.print_changes,
                 on_progress=report_progress,
             )
-        if result.total % args.progress_every:
+        if progress_events % args.progress_every:
             _print_progress(result, sys.stderr)
         print(
             "Scrape complete: "
