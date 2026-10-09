@@ -22,8 +22,8 @@ def _instrument(
 
 
 def _exchange(
-    exchange_id: str,
-    country_code: str,
+    exchange_id: str | None,
+    country_code: str | None,
     **extra: Any,
 ) -> Exchange:
     return Exchange.model_validate(
@@ -53,7 +53,6 @@ def test_scrape_and_store_classifies_records_and_prints_details(
             [
                 _instrument(1, "FIRST"),
                 _instrument(None, "NO-ID"),
-                _instrument(None, "NO-ID"),
                 _instrument(2, "UNCHANGED"),
             ]
         ),
@@ -67,18 +66,19 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         on_progress=progress.append,
     )
 
+    assert first.total == 3
     assert (
-        first.processed,
-        first.new_with_conid,
-        first.changed_with_conid,
-        first.unchanged_with_conid,
-        first.new_without_conid,
-        first.unchanged_without_conid,
-    ) == (4, 2, 0, 0, 1, 1)
-    assert missing_primary_key_store.get(
+        first.new_with_primary_key,
+        first.changed_with_primary_key,
+        first.unchanged_with_primary_key,
+        first.new_without_primary_key,
+        first.unchanged_without_primary_key,
+    ) == (2, 0, 0, 1, 0)
+    assert missing_primary_key_store.put(
         first.as_of,
         _instrument(None, "NO-ID"),
-    ) is None
+        None,
+    ) is False
     assert progress[-1] == first
     assert store.get(first.as_of, 1) == _instrument(1, "FIRST")
     printed = [json.loads(line) for line in output.getvalue().splitlines() if line]
@@ -104,14 +104,14 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         output=output,
     )
 
+    assert second.total == 3
     assert (
-        second.processed,
-        second.new_with_conid,
-        second.changed_with_conid,
-        second.unchanged_with_conid,
-        second.new_without_conid,
-        second.unchanged_without_conid,
-    ) == (3, 1, 1, 1, 0, 0)
+        second.new_with_primary_key,
+        second.changed_with_primary_key,
+        second.unchanged_with_primary_key,
+        second.new_without_primary_key,
+        second.unchanged_without_primary_key,
+    ) == (1, 1, 1, 0, 0)
     assert store.get(second.as_of, 1) == _instrument(
         1,
         "FIRST-UPDATED",
@@ -146,16 +146,17 @@ def test_async_scrape_and_store_saves_instrument_models(
         )
     )
 
-    assert report.processed == 2
-    assert report.new_with_conid == 1
-    assert report.new_without_conid == 1
+    assert report.total == 2
+    assert report.new_with_primary_key == 1
+    assert report.new_without_primary_key == 1
     assert store.get(report.as_of, 42) == _instrument(42, "ASYNC")
     assert (
-        missing_primary_key_store.get(
+        missing_primary_key_store.put(
             report.as_of,
             _instrument(None, "MISSING"),
+            None,
         )
-        is None
+        is False
     )
 
 
@@ -194,8 +195,12 @@ def test_scrape_and_store_uses_sql_store_idempotently(
             missing_primary_key_store=missing_primary_key_store,
         )
 
-        assert first.new_with_conid == first.new_without_conid == 1
-        assert second.unchanged_with_conid == second.unchanged_without_conid == 1
+        assert first.total == 2
+        assert first.new_with_primary_key == 1
+        assert first.new_without_primary_key == 1
+        assert second.total == 2
+        assert second.unchanged_with_primary_key == 1
+        assert second.unchanged_without_primary_key == 1
         assert store.get(second.as_of, 7) == _instrument(7, "SQL")
         assert missing_primary_key_store.put(
             second.as_of,
@@ -226,14 +231,11 @@ def test_cli_wires_filters_progress_and_closes_store(
     )
     captured: dict[str, Any] = {}
 
-    def fake_scrape(
-        store_arg: Any,
-        **kwargs: Any,
-    ) -> ib_scraper.InstrumentScrapeReport:
+    def fake_scrape(store_arg: Any, **kwargs: Any) -> ib_scraper.ScrapeReport:
         captured.update(kwargs)
-        report = ib_scraper.InstrumentScrapeReport(
+        report = ib_scraper.ScrapeReport(
             as_of=datetime(2026, 1, 1, tzinfo=UTC),
-            new_with_conid=1,
+            new_with_primary_key=1,
         )
         kwargs["on_progress"](report)
         return report
@@ -287,16 +289,8 @@ def test_cli_wires_filters_progress_and_closes_store(
     assert captured["print_changes"] is True
     assert store.closed is True
     stderr = capsys.readouterr().err
-    assert (
-        "Processed 1: new_with_conid=1, changed_with_conid=0, "
-        "unchanged_with_conid=0, new_without_conid=0, "
-        "unchanged_without_conid=0"
-    ) in stderr
-    assert (
-        "Scrape complete: processed=1, new_with_conid=1, "
-        "changed_with_conid=0, unchanged_with_conid=0, "
-        "new_without_conid=0, unchanged_without_conid=0"
-    ) in stderr
+    assert "Total 1: new_with_primary_key=1" in stderr
+    assert "Scrape complete: total=1, new_with_primary_key=1" in stderr
 
 
 def test_cli_uses_default_instrument_template_table(
@@ -315,7 +309,7 @@ def test_cli_uses_default_instrument_template_table(
     monkeypatch.setattr(
         ib_scraper,
         "scrape_and_store_instruments",
-        lambda store, **kwargs: ib_scraper.InstrumentScrapeReport(
+        lambda store, **kwargs: ib_scraper.ScrapeReport(
             as_of=datetime(2026, 1, 1, tzinfo=UTC)
         ),
     )
@@ -405,6 +399,7 @@ def test_cli_validates_page_number_limits(
 
 def test_exchange_primary_key_and_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     store = AsOfStore.from_memory()
+    missing_primary_key_store = AsOfStore.from_memory()
     output = StringIO()
     exchange = _exchange("LSE", "GB")
     same_id_different_country_code = _exchange("LSE", "DE")
@@ -416,12 +411,13 @@ def test_exchange_primary_key_and_persistence(monkeypatch: pytest.MonkeyPatch) -
 
     report = ib_scraper.scrape_and_store_exchanges(
         store,
+        missing_primary_key_store=missing_primary_key_store,
         print_new=True,
         output=output,
     )
 
     assert exchange.primary_key == ("LSE", "GB")
-    assert report.new == 2
+    assert report.new_with_primary_key == 2
     assert store.get(report.as_of, exchange.primary_key) == exchange
     assert (
         store.get(report.as_of, same_id_different_country_code.primary_key)
@@ -438,11 +434,48 @@ def test_exchange_primary_key_and_persistence(monkeypatch: pytest.MonkeyPatch) -
         "scrape_exchanges",
         lambda *args, **kwargs: [_exchange("LSE", "GB", name="Updated")],
     )
-    changed = ib_scraper.scrape_and_store_exchanges(store, print_changes=True)
-    assert changed.changed == 1
+    changed = ib_scraper.scrape_and_store_exchanges(
+        store,
+        missing_primary_key_store=missing_primary_key_store,
+        print_changes=True,
+    )
+    assert changed.changed_with_primary_key == 1
     value = store.get(changed.as_of, exchange.primary_key)
     assert value is not None
     assert value.name == "Updated"
+
+
+def test_exchange_without_primary_key_uses_template_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = AsOfStore.from_memory()
+    missing_primary_key_store = AsOfStore.from_memory()
+    template = _exchange("", "GB")
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_exchanges",
+        lambda *args, **kwargs: [template],
+    )
+
+    first = ib_scraper.scrape_and_store_exchanges(
+        store,
+        missing_primary_key_store=missing_primary_key_store,
+    )
+    second = ib_scraper.scrape_and_store_exchanges(
+        store,
+        missing_primary_key_store=missing_primary_key_store,
+    )
+
+    assert template.primary_key is None
+    assert first.new_without_primary_key == 1
+    assert second.unchanged_without_primary_key == 1
+    assert missing_primary_key_store.put(first.as_of, template, None) is False
+    assert store.get(first.as_of, ("", "GB")) is None
+
+    no_country_code = _exchange("LSE", None)
+    assert no_country_code.primary_key is None
+    no_exchange_id = _exchange(None, "GB")
+    assert no_exchange_id.primary_key is None
 
 
 def test_memory_store_accepts_unhashable_instrument_keys() -> None:
@@ -467,18 +500,52 @@ def test_async_exchange_scraper_stores_sql_tuple_key(
         Exchange,
     )
     exchange = _exchange("LSE", "GB")
+    missing_primary_key_store = AsOfStore.from_sql(
+        "sqlite:///:memory:",
+        "ib_exchange_template_versions",
+        datetime,
+        Exchange,
+        NoneType,
+    )
+    template = _exchange("", "GB")
 
     async def fake_scrape(*args: Any, **kwargs: Any):
         yield exchange
 
+    async def fake_template_scrape(*args: Any, **kwargs: Any):
+        yield template
+
     monkeypatch.setattr(ib_scraper, "scrape_exchanges_async", fake_scrape)
 
     try:
-        report = asyncio.run(ib_scraper.async_scrape_and_store_exchanges(store))
-        assert report.new == 1
+        report = asyncio.run(
+            ib_scraper.async_scrape_and_store_exchanges(
+                store,
+                missing_primary_key_store=missing_primary_key_store,
+            )
+        )
+        assert report.new_with_primary_key == 1
         assert store.get(report.as_of, ("LSE", "GB")) == exchange
+        monkeypatch.setattr(
+            ib_scraper,
+            "scrape_exchanges_async",
+            fake_template_scrape,
+        )
+        missing_report = asyncio.run(
+            ib_scraper.async_scrape_and_store_exchanges(
+                store,
+                missing_primary_key_store=missing_primary_key_store,
+            )
+        )
+        assert missing_report.new_without_primary_key == 1
+        assert missing_primary_key_store.put(
+            missing_report.as_of,
+            template,
+            None,
+        ) is False
     finally:
         store.close()
+        missing_primary_key_store.close()
 
 
 def test_exchange_cli_uses_tuple_key_and_model(
@@ -498,13 +565,16 @@ def test_exchange_cli_uses_tuple_key_and_model(
         "from_sql",
         classmethod(lambda cls, *args: created.append(args) or store),
     )
+    captured: dict[str, Any] = {}
     monkeypatch.setattr(
         ib_scraper,
         "scrape_and_store_exchanges",
-        lambda store_arg, **kwargs: ib_scraper.ScrapeReport(
-            as_of=datetime(2026, 1, 1, tzinfo=UTC),
-            processed=1,
-            new=1,
+        lambda store_arg, **kwargs: (
+            captured.update(kwargs)
+            or ib_scraper.ScrapeReport(
+                as_of=datetime(2026, 1, 1, tzinfo=UTC),
+                new_with_primary_key=1,
+            )
         ),
     )
 
@@ -512,7 +582,15 @@ def test_exchange_cli_uses_tuple_key_and_model(
 
     assert result == 0
     assert created == [
-        ("sqlite:///:memory:", "ib_exchanges", datetime, tuple, Exchange)
+        ("sqlite:///:memory:", "ib_exchanges", datetime, tuple, Exchange),
+        (
+            "sqlite:///:memory:",
+            "ib_exchange_templates",
+            datetime,
+            Exchange,
+            NoneType,
+        ),
     ]
+    assert captured["missing_primary_key_store"] is store
     assert store.closed is True
-    assert "Scrape complete: processed=1, new=1" in capsys.readouterr().err
+    assert "Scrape complete: total=1, new_with_primary_key=1" in capsys.readouterr().err

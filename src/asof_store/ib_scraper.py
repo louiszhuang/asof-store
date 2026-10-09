@@ -20,39 +20,28 @@ from .ib_models import Exchange, Instrument, NewProduct
 type InstrumentStore = AsOfStoreABC[datetime, int, Instrument]
 type MissingPrimaryKeyStore = AsOfStoreABC[datetime, Instrument, NoneType]
 type ExchangeStore = AsOfStoreABC[datetime, tuple[str, str], Exchange]
+type MissingExchangePrimaryKeyStore = AsOfStoreABC[datetime, Exchange, NoneType]
+type ProgressCallback = Callable[["ScrapeReport"], None]
 
 
 @dataclass
 class ScrapeReport:
     as_of: datetime
-    processed: int = 0
-    new: int = 0
-    changed: int = 0
-    unchanged: int = 0
-
-
-@dataclass
-class InstrumentScrapeReport:
-    as_of: datetime
-    new_with_conid: int = 0
-    changed_with_conid: int = 0
-    unchanged_with_conid: int = 0
-    new_without_conid: int = 0
-    unchanged_without_conid: int = 0
+    new_with_primary_key: int = 0
+    changed_with_primary_key: int = 0
+    unchanged_with_primary_key: int = 0
+    new_without_primary_key: int = 0
+    unchanged_without_primary_key: int = 0
 
     @property
-    def processed(self) -> int:
+    def total(self) -> int:
         return (
-            self.new_with_conid
-            + self.changed_with_conid
-            + self.unchanged_with_conid
-            + self.new_without_conid
-            + self.unchanged_without_conid
+            self.new_with_primary_key
+            + self.changed_with_primary_key
+            + self.unchanged_with_primary_key
+            + self.new_without_primary_key
+            + self.unchanged_without_primary_key
         )
-
-
-type ProgressReport = ScrapeReport | InstrumentScrapeReport
-type ProgressCallback = Callable[[ProgressReport], None]
 
 
 def _instrument_json(instrument: Instrument) -> dict[str, object]:
@@ -85,6 +74,7 @@ def _instrument_diff(
 
 def _record_exchange(
     store: ExchangeStore,
+    missing_primary_key_store: MissingExchangePrimaryKeyStore,
     exchange: Exchange,
     report: ScrapeReport,
     *,
@@ -92,26 +82,37 @@ def _record_exchange(
     print_changes: bool,
     output: TextIO,
 ) -> None:
-    report.processed += 1
     primary_key = exchange.primary_key
+    if primary_key is None:
+        if missing_primary_key_store.put(report.as_of, exchange, None):
+            report.new_without_primary_key += 1
+            if print_new:
+                _print_json(
+                    output,
+                    {"event": "new", "exchange": _exchange_json(exchange)},
+                )
+        else:
+            report.unchanged_without_primary_key += 1
+        return
+
     current = _exchange_json(exchange)
     previous = store.get(report.as_of, primary_key)
     if previous is None:
         store.put(report.as_of, primary_key, exchange)
-        report.new += 1
+        report.new_with_primary_key += 1
         if print_new:
             _print_json(output, {"event": "new", "exchange": current})
         return
 
     changes = _instrument_diff(_exchange_json(previous), current)
     if not changes:
-        report.unchanged += 1
+        report.unchanged_with_primary_key += 1
         return
 
     timestamp = max(datetime.now(UTC), report.as_of + timedelta(microseconds=1))
     report.as_of = timestamp
     store.put(timestamp, primary_key, exchange)
-    report.changed += 1
+    report.changed_with_primary_key += 1
     if print_changes:
         _print_json(
             output,
@@ -134,7 +135,7 @@ def _record_instrument(
     store: InstrumentStore,
     missing_primary_key_store: MissingPrimaryKeyStore,
     instrument: Instrument,
-    report: InstrumentScrapeReport,
+    report: ScrapeReport,
     *,
     print_new: bool,
     print_changes: bool,
@@ -144,34 +145,34 @@ def _record_instrument(
     if primary_key is None:
         stored = missing_primary_key_store.put(report.as_of, instrument, None)
         if stored:
-            report.new_without_conid += 1
+            report.new_without_primary_key += 1
             if print_new:
                 _print_json(
                     output,
                     {"event": "new", "instrument": _instrument_json(instrument)},
                 )
         else:
-            report.unchanged_without_conid += 1
+            report.unchanged_without_primary_key += 1
         return
 
     current = _instrument_json(instrument)
     previous = store.get(report.as_of, primary_key)
     if previous is None:
         store.put(report.as_of, primary_key, instrument)
-        report.new_with_conid += 1
+        report.new_with_primary_key += 1
         if print_new:
             _print_json(output, {"event": "new", "instrument": current})
         return
 
     changes = _instrument_diff(_instrument_json(previous), current)
     if not changes:
-        report.unchanged_with_conid += 1
+        report.unchanged_with_primary_key += 1
         return
 
     timestamp = max(datetime.now(UTC), report.as_of + timedelta(microseconds=1))
     report.as_of = timestamp
     store.put(timestamp, primary_key, instrument)
-    report.changed_with_conid += 1
+    report.changed_with_primary_key += 1
     if print_changes:
         _print_json(
             output,
@@ -200,9 +201,9 @@ def scrape_and_store_instruments(
     output: TextIO | None = None,
     on_progress: ProgressCallback | None = None,
     client: Any | None = None,
-) -> InstrumentScrapeReport:
+) -> ScrapeReport:
     """Fetch IB instruments, save changes by conid, and return run counts."""
-    report = InstrumentScrapeReport(as_of=datetime.now(UTC))
+    report = ScrapeReport(as_of=datetime.now(UTC))
     output = sys.stdout if output is None else output
     instruments = scrape_instruments(
         client,
@@ -247,9 +248,9 @@ async def async_scrape_and_store_instruments(
     output: TextIO | None = None,
     on_progress: ProgressCallback | None = None,
     client: Any | None = None,
-) -> InstrumentScrapeReport:
+) -> ScrapeReport:
     """Asynchronously fetch IB instruments and save changes by conid."""
-    report = InstrumentScrapeReport(as_of=datetime.now(UTC))
+    report = ScrapeReport(as_of=datetime.now(UTC))
     output = sys.stdout if output is None else output
     instruments: AsyncIterator[Instrument] = scrape_instruments_async(
         client,
@@ -280,6 +281,7 @@ async def async_scrape_and_store_instruments(
 def scrape_and_store_exchanges(
     store: ExchangeStore,
     *,
+    missing_primary_key_store: MissingExchangePrimaryKeyStore,
     timeout: float = 30,
     print_new: bool = False,
     print_changes: bool = False,
@@ -293,6 +295,7 @@ def scrape_and_store_exchanges(
     for exchange in scrape_exchanges(client, timeout=timeout):
         _record_exchange(
             store,
+            missing_primary_key_store,
             exchange,
             report,
             print_new=print_new,
@@ -307,6 +310,7 @@ def scrape_and_store_exchanges(
 async def async_scrape_and_store_exchanges(
     store: ExchangeStore,
     *,
+    missing_primary_key_store: MissingExchangePrimaryKeyStore,
     timeout: float = 30,
     print_new: bool = False,
     print_changes: bool = False,
@@ -320,6 +324,7 @@ async def async_scrape_and_store_exchanges(
     async for exchange in scrape_exchanges_async(client, timeout=timeout):
         _record_exchange(
             store,
+            missing_primary_key_store,
             exchange,
             report,
             print_new=print_new,
@@ -358,6 +363,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="ib_instrument_templates",
         help="table for instruments that do not have a conid",
     )
+    exchanges_parser.add_argument(
+        "--missing-primary-key-table-name",
+        default="ib_exchange_templates",
+        help="table for exchanges missing id or country_code",
+    )
     instruments_parser.add_argument("--domain", default="uk")
     instruments_parser.add_argument("--page-size", type=int, default=500)
     instruments_parser.add_argument("--product-type", action="append")
@@ -380,8 +390,16 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_progress(report: ProgressReport, output: TextIO) -> None:
-    print(f"Processed {report.processed}: {_summary_counts(report)}", file=output)
+def _print_progress(report: ScrapeReport, output: TextIO) -> None:
+    print(
+        f"Total {report.total}: "
+        f"new_with_primary_key={report.new_with_primary_key}, "
+        f"changed_with_primary_key={report.changed_with_primary_key}, "
+        f"unchanged_with_primary_key={report.unchanged_with_primary_key}, "
+        f"new_without_primary_key={report.new_without_primary_key}, "
+        f"unchanged_without_primary_key={report.unchanged_without_primary_key}",
+        file=output,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -409,11 +427,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError(
                 "--end-page-number must be at least --start-page-number"
             )
+    elif args.table_name == args.missing_primary_key_table_name:
+        raise ValueError(
+            "--table-name and --missing-primary-key-table-name must differ"
+        )
 
     is_instruments = args.command == "scrape-instruments"
     key_type = int if is_instruments else tuple
     value_type = Instrument if is_instruments else Exchange
     missing_primary_key_store: MissingPrimaryKeyStore | None = None
+    missing_exchange_primary_key_store: MissingExchangePrimaryKeyStore | None = None
     try:
         store = AsOfStore.from_sql(
             args.sql_uri,
@@ -434,6 +457,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             except Exception:
                 store.close()
                 raise
+        else:
+            try:
+                missing_exchange_primary_key_store = AsOfStore.from_sql(
+                    args.sql_uri,
+                    args.missing_primary_key_table_name,
+                    datetime,
+                    Exchange,
+                    NoneType,
+                )
+            except Exception:
+                store.close()
+                raise
     except ImportError as exc:
         raise ImportError(
             "The IB scraper CLI requires SQLAlchemy; install "
@@ -442,8 +477,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
 
-        def report_progress(report: ProgressReport) -> None:
-            if report.processed % args.progress_every == 0:
+        def report_progress(report: ScrapeReport) -> None:
+            if report.total % args.progress_every == 0:
                 _print_progress(report, sys.stderr)
 
         if is_instruments:
@@ -466,41 +501,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                 on_progress=report_progress,
             )
         else:
+            assert missing_exchange_primary_key_store is not None
             result = scrape_and_store_exchanges(
                 store,
+                missing_primary_key_store=missing_exchange_primary_key_store,
                 timeout=args.timeout,
                 print_new=args.print_new,
                 print_changes=args.print_changes,
                 on_progress=report_progress,
             )
-        if result.processed % args.progress_every:
+        if result.total % args.progress_every:
             _print_progress(result, sys.stderr)
         print(
             "Scrape complete: "
-            f"processed={result.processed}, "
-            f"{_summary_counts(result)}, as_of={result.as_of.isoformat()}",
+            f"total={result.total}, "
+            f"new_with_primary_key={result.new_with_primary_key}, "
+            f"changed_with_primary_key={result.changed_with_primary_key}, "
+            f"unchanged_with_primary_key={result.unchanged_with_primary_key}, "
+            f"new_without_primary_key={result.new_without_primary_key}, "
+            f"unchanged_without_primary_key={result.unchanged_without_primary_key}, "
+            f"as_of={result.as_of.isoformat()}",
             file=sys.stderr,
         )
     finally:
         store.close()
         if missing_primary_key_store is not None:
             missing_primary_key_store.close()
+        if missing_exchange_primary_key_store is not None:
+            missing_exchange_primary_key_store.close()
     return 0
-
-
-def _summary_counts(report: ScrapeReport | InstrumentScrapeReport) -> str:
-    if isinstance(report, InstrumentScrapeReport):
-        return (
-            f"new_with_conid={report.new_with_conid}, "
-            f"changed_with_conid={report.changed_with_conid}, "
-            f"unchanged_with_conid={report.unchanged_with_conid}, "
-            f"new_without_conid={report.new_without_conid}, "
-            f"unchanged_without_conid={report.unchanged_without_conid}"
-        )
-    return (
-        f"new={report.new}, changed={report.changed}, "
-        f"unchanged={report.unchanged}"
-    )
 
 
 if __name__ == "__main__":

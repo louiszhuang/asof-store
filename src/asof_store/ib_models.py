@@ -95,16 +95,18 @@ class Exchange(BaseModel):
         json_schema_extra={"primary_key": ["id", "country_code"]},
     )
 
-    id: str
+    id: str | None = None
     name: str
     country: str
     region: str
     assets: str
-    country_code: str
+    country_code: str | None = None
 
     @property
-    def primary_key(self) -> tuple[str, str]:
-        """Return the exchange ID and country code as its composite key."""
+    def primary_key(self) -> tuple[str, str] | None:
+        """Return the composite key when both components are present."""
+        if not self.id or not self.country_code:
+            return None
         return self.id, self.country_code
 
 
