@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 
 from asof_store import AsOfStore, ib_scraper
-from asof_store.ib_models import Exchange, Instrument
+from asof_store.ib import InstrumentScrapeSummary
+from asof_store.ib_models import Exchange, Instrument, InstrumentSummaryItem
 
 
 def _instrument(
@@ -46,11 +47,16 @@ def test_scrape_and_store_classifies_records_and_prints_details(
     missing_primary_key_store = AsOfStore.from_memory()
     output = StringIO()
     progress = []
+    callback_order: list[str] = []
+    summary_event = InstrumentScrapeSummary(
+        (InstrumentSummaryItem(productType="STK", totalCount=2),)
+    )
     monkeypatch.setattr(
         ib_scraper,
         "scrape_instruments",
         lambda *args, **kwargs: iter(
             [
+                summary_event,
                 _instrument(1, "FIRST"),
                 _instrument(None, "NO-ID"),
                 _instrument(2, "UNCHANGED"),
@@ -58,12 +64,17 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         ),
     )
 
+    def on_progress(report: ib_scraper.ScrapeReport) -> None:
+        progress.append(report)
+        callback_order.append("process")
+
     first = ib_scraper.scrape_and_store_instruments(
         store,
         missing_primary_key_store=missing_primary_key_store,
         print_new=True,
         output=output,
-        on_progress=progress.append,
+        on_progress=on_progress,
+        on_summary=lambda summary: callback_order.append(summary.event),
     )
 
     assert first.total == 3
@@ -74,12 +85,16 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         first.new_without_primary_key,
         first.unchanged_without_primary_key,
     ) == (2, 0, 0, 1, 0)
-    assert missing_primary_key_store.put(
-        first.as_of,
-        _instrument(None, "NO-ID"),
-        None,
-    ) is False
+    assert (
+        missing_primary_key_store.put(
+            first.as_of,
+            _instrument(None, "NO-ID"),
+            None,
+        )
+        is False
+    )
     assert progress[-1] == first
+    assert callback_order == ["summary", "process", "process", "process"]
     assert store.get(first.as_of, 1) == _instrument(1, "FIRST")
     printed = [json.loads(line) for line in output.getvalue().splitlines() if line]
     assert len(printed) == 3
@@ -134,21 +149,28 @@ def test_async_scrape_and_store_saves_instrument_models(
     missing_primary_key_store = AsOfStore.from_memory()
 
     async def fake_scrape(*args: Any, **kwargs: Any):
+        yield InstrumentScrapeSummary(
+            (InstrumentSummaryItem(productType="STK", totalCount=1),)
+        )
         yield _instrument(42, "ASYNC")
         yield _instrument(None, "MISSING")
 
     monkeypatch.setattr(ib_scraper, "scrape_instruments_async", fake_scrape)
 
+    callback_order: list[str] = []
     report = asyncio.run(
         ib_scraper.async_scrape_and_store_instruments(
             store,
             missing_primary_key_store=missing_primary_key_store,
+            on_summary=lambda summary: callback_order.append(summary.event),
+            on_progress=lambda report: callback_order.append("process"),
         )
     )
 
     assert report.total == 2
     assert report.new_with_primary_key == 1
     assert report.new_without_primary_key == 1
+    assert callback_order == ["summary", "process", "process"]
     assert store.get(report.as_of, 42) == _instrument(42, "ASYNC")
     assert (
         missing_primary_key_store.put(
@@ -202,11 +224,14 @@ def test_scrape_and_store_uses_sql_store_idempotently(
         assert second.unchanged_with_primary_key == 1
         assert second.unchanged_without_primary_key == 1
         assert store.get(second.as_of, 7) == _instrument(7, "SQL")
-        assert missing_primary_key_store.put(
-            second.as_of,
-            _instrument(None, "NO-CONID"),
-            None,
-        ) is False
+        assert (
+            missing_primary_key_store.put(
+                second.as_of,
+                _instrument(None, "NO-CONID"),
+                None,
+            )
+            is False
+        )
     finally:
         store.close()
         missing_primary_key_store.close()
@@ -236,6 +261,11 @@ def test_cli_wires_filters_progress_and_closes_store(
         report = ib_scraper.ScrapeReport(
             as_of=datetime(2026, 1, 1, tzinfo=UTC),
             new_with_primary_key=1,
+        )
+        kwargs["on_summary"](
+            InstrumentScrapeSummary(
+                (InstrumentSummaryItem(productType="STK", totalCount=25),)
+            )
         )
         kwargs["on_progress"](report)
         return report
@@ -291,6 +321,7 @@ def test_cli_wires_filters_progress_and_closes_store(
     stderr = capsys.readouterr().err
     assert "Total 1: new_with_primary_key=1" in stderr
     assert "Scrape complete: total=1, new_with_primary_key=1" in stderr
+    assert stderr.index("Instrument summary: STK=25") < stderr.index("Total 1:")
 
 
 def test_cli_uses_default_instrument_template_table(
@@ -538,11 +569,14 @@ def test_async_exchange_scraper_stores_sql_tuple_key(
             )
         )
         assert missing_report.new_without_primary_key == 1
-        assert missing_primary_key_store.put(
-            missing_report.as_of,
-            template,
-            None,
-        ) is False
+        assert (
+            missing_primary_key_store.put(
+                missing_report.as_of,
+                template,
+                None,
+            )
+            is False
+        )
     finally:
         store.close()
         missing_primary_key_store.close()

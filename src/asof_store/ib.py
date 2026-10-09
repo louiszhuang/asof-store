@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 try:
     from pydantic import TypeAdapter
@@ -27,6 +28,15 @@ _BASE_URL = "https://www.interactivebrokers.co.uk/webrest"
 _EXCHANGES_URL = f"{_BASE_URL}/exchanges/"
 _SUMMARY_URL = f"{_BASE_URL}/search/product-types/summary"
 _PRODUCTS_URL = f"{_BASE_URL}/search/products-by-filters"
+
+
+@dataclass(frozen=True)
+class InstrumentScrapeSummary:
+    products: tuple[InstrumentSummaryItem, ...]
+    event: Literal["summary"] = "summary"
+
+
+type InstrumentScrapeItem = InstrumentScrapeSummary | Instrument
 
 
 @contextmanager
@@ -338,8 +348,8 @@ def scrape_instruments(
     start_page_number: int = 1,
     end_page_number: int | None = None,
     timeout: float = 30,
-) -> Generator[Instrument]:
-    """Yield instruments, optionally filtered by product type and country."""
+) -> Generator[InstrumentScrapeItem]:
+    """Yield a summary event, then instruments filtered by type and country."""
     if start_page_number < 1:
         raise ValueError("start_page_number must be at least 1")
     if end_page_number is not None and end_page_number < 1:
@@ -364,7 +374,9 @@ def scrape_instruments(
             new_product=new_product,
             timeout=timeout,
         )
-        for _product_type, total_count in _product_totals(summary).items():
+        totals = _product_totals(summary)
+        yield InstrumentScrapeSummary(tuple(summary))
+        for _product_type, total_count in totals.items():
             page_count = (total_count + page_size - 1) // page_size
             last_page_number = (
                 page_count
@@ -405,8 +417,8 @@ async def scrape_instruments_async(
     start_page_number: int = 1,
     end_page_number: int | None = None,
     timeout: float = 30,
-) -> AsyncGenerator[Instrument]:
-    """Asynchronously yield instruments filtered by type and country."""
+) -> AsyncGenerator[InstrumentScrapeItem]:
+    """Asynchronously yield a summary event, then filtered instruments."""
     if start_page_number < 1:
         raise ValueError("start_page_number must be at least 1")
     if end_page_number is not None and end_page_number < 1:
@@ -431,7 +443,9 @@ async def scrape_instruments_async(
             new_product=new_product,
             timeout=timeout,
         )
-        for _product_type, total_count in _product_totals(summary).items():
+        totals = _product_totals(summary)
+        yield InstrumentScrapeSummary(tuple(summary))
+        for _product_type, total_count in totals.items():
             page_count = (total_count + page_size - 1) // page_size
             last_page_number = (
                 page_count

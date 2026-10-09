@@ -7,6 +7,7 @@ from asof_store.ib import (
     _EXCHANGES_URL,
     _PRODUCTS_URL,
     _SUMMARY_URL,
+    InstrumentScrapeSummary,
     get_exchanges,
     get_exchanges_async,
     get_instrument_summary,
@@ -296,16 +297,22 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         )
     )
 
-    assert len(results) == 101
-    assert isinstance(results[0], Instrument)
-    assert results[0].product_type == "STK"
-    assert results[0].page == 1  # ty: ignore[unresolved-attribute]
-    assert results[0].index == 0  # ty: ignore[unresolved-attribute]
-    assert results[99].index == 99  # ty: ignore[unresolved-attribute]
-    assert results[100].page == 2  # ty: ignore[unresolved-attribute]
-    assert results[-1].product_type == "STK"
-    assert results[-1].page == 2  # ty: ignore[unresolved-attribute]
-    assert results[-1].index == 0  # ty: ignore[unresolved-attribute]
+    assert isinstance(results[0], InstrumentScrapeSummary)
+    assert results[0].event == "summary"
+    assert [(item.product_type, item.total_count) for item in results[0].products] == [
+        ("STK", 101)
+    ]
+    products = results[1:]
+    assert len(products) == 101
+    assert isinstance(products[0], Instrument)
+    assert products[0].product_type == "STK"
+    assert products[0].page == 1  # ty: ignore[unresolved-attribute]
+    assert products[0].index == 0  # ty: ignore[unresolved-attribute]
+    assert products[99].index == 99  # ty: ignore[unresolved-attribute]
+    assert products[100].page == 2  # ty: ignore[unresolved-attribute]
+    assert products[-1].product_type == "STK"  # ty: ignore[unresolved-attribute]
+    assert products[-1].page == 2  # ty: ignore[unresolved-attribute]
+    assert products[-1].index == 0  # ty: ignore[unresolved-attribute]
     assert len(client.requests) == 3
     assert all(
         request[2]["payload"]["productCountry"] == ["US", "CA"]
@@ -316,6 +323,28 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         for request in client.requests
         if request[1] in (_SUMMARY_URL, _PRODUCTS_URL)
     )
+
+
+def test_scrape_instruments_yields_summary_before_requesting_products() -> None:
+    def respond(method: str, url: str, payload: Any) -> FakeResponse:
+        if url == _SUMMARY_URL:
+            return FakeResponse([{"productType": "STK", "totalCount": 1}])
+        return FakeResponse({"products": [{"type": "STK"}]})
+
+    client = FakeClient(respond)
+    items = scrape_instruments(client, product_type=["STK"], page_size=100)
+
+    summary = next(items)
+    assert isinstance(summary, InstrumentScrapeSummary)
+    assert [request[1] for request in client.requests] == [_SUMMARY_URL]
+
+    instrument = next(items)
+    assert isinstance(instrument, Instrument)
+    assert [request[1] for request in client.requests] == [
+        _SUMMARY_URL,
+        _PRODUCTS_URL,
+    ]
+    items.close()
 
 
 def test_scrape_instruments_can_start_from_selected_product_page() -> None:
@@ -335,7 +364,7 @@ def test_scrape_instruments_can_start_from_selected_product_page() -> None:
             }
         )
 
-    products = list(
+    items = list(
         scrape_instruments(
             FakeClient(respond),
             page_size=100,
@@ -345,6 +374,8 @@ def test_scrape_instruments_can_start_from_selected_product_page() -> None:
     )
 
     assert requested_pages == [2, 3]
+    assert isinstance(items[0], InstrumentScrapeSummary)
+    products = items[1:]
     pages = [product.page for product in products]  # ty: ignore[unresolved-attribute]
     assert pages == [2] * 100 + [3]
 
@@ -366,7 +397,7 @@ def test_scrape_instruments_limits_pages_inclusively() -> None:
             }
         )
 
-    products = list(
+    items = list(
         scrape_instruments(
             FakeClient(respond),
             page_size=100,
@@ -377,6 +408,8 @@ def test_scrape_instruments_limits_pages_inclusively() -> None:
     )
 
     assert requested_pages == [2, 3]
+    assert isinstance(items[0], InstrumentScrapeSummary)
+    products = items[1:]
     assert len(products) == 200
 
 
@@ -432,6 +465,9 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
             )
         ]
 
+        assert isinstance(products[0], InstrumentScrapeSummary)
+        assert products[0].products[0].total_count == 101
+        products = products[1:]
         assert len(products) == 101
         assert isinstance(products[0], Instrument)
         assert products[0].product_type == "STK"
@@ -439,7 +475,7 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
         assert products[0].index == 0  # ty: ignore[unresolved-attribute]
         assert products[99].index == 99  # ty: ignore[unresolved-attribute]
         assert products[100].page == 2  # ty: ignore[unresolved-attribute]
-        assert products[-1].product_type == "STK"
+        assert products[-1].product_type == "STK"  # ty: ignore[unresolved-attribute]
         assert products[-1].page == 2  # ty: ignore[unresolved-attribute]
         assert products[-1].index == 0  # ty: ignore[unresolved-attribute]
         assert len(client.requests) == 3
@@ -452,6 +488,35 @@ def test_scrape_instruments_async_fetches_every_reported_page() -> None:
             for request in client.requests
             if request[1] in (_SUMMARY_URL, _PRODUCTS_URL)
         )
+
+    asyncio.run(exercise())
+
+
+def test_scrape_instruments_async_yields_summary_before_requesting_products() -> None:
+    async def exercise() -> None:
+        def respond(method: str, url: str, payload: Any) -> FakeResponse:
+            if url == _SUMMARY_URL:
+                return FakeResponse([{"productType": "STK", "totalCount": 1}])
+            return FakeResponse({"products": [{"type": "STK"}]})
+
+        client = AsyncFakeClient(respond)
+        items = scrape_instruments_async(
+            client,
+            product_type=["STK"],
+            page_size=100,
+        )
+
+        summary = await anext(items)
+        assert isinstance(summary, InstrumentScrapeSummary)
+        assert [request[1] for request in client.requests] == [_SUMMARY_URL]
+
+        instrument = await anext(items)
+        assert isinstance(instrument, Instrument)
+        assert [request[1] for request in client.requests] == [
+            _SUMMARY_URL,
+            _PRODUCTS_URL,
+        ]
+        await items.aclose()
 
     asyncio.run(exercise())
 
@@ -485,6 +550,8 @@ def test_scrape_instruments_async_can_start_from_selected_product_page() -> None
         ]
 
         assert requested_pages == [2, 3]
+        assert isinstance(products[0], InstrumentScrapeSummary)
+        products = products[1:]
         pages = [product.page for product in products]  # ty: ignore[unresolved-attribute]
         assert pages == [2] * 100 + [3]
 
@@ -521,6 +588,8 @@ def test_scrape_instruments_async_limits_pages_inclusively() -> None:
         ]
 
         assert requested_pages == [2, 3]
+        assert isinstance(products[0], InstrumentScrapeSummary)
+        products = products[1:]
         assert len(products) == 200
 
     asyncio.run(exercise())

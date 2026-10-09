@@ -105,11 +105,14 @@ it, in which case `Instrument.primary_key` returns `None`. Exchanges use the
 composite primary key `(id, country_code)`.
 
 ```python
-from asof_store.ib import get_exchanges, scrape_instruments
+from asof_store.ib import InstrumentScrapeSummary, get_exchanges, scrape_instruments
 
 exchanges = get_exchanges()
-for instrument in scrape_instruments(page_size=500):
-    print(instrument)
+for item in scrape_instruments(page_size=500):
+    if isinstance(item, InstrumentScrapeSummary):
+        print("Summary:", item.products)
+    else:
+        print(item)
 
 us_stocks = scrape_instruments(
     page_size=500,
@@ -122,13 +125,20 @@ us_stocks = scrape_instruments(
 ```python
 import asyncio
 
-from asof_store.ib import get_exchanges_async, scrape_instruments_async
+from asof_store.ib import (
+    InstrumentScrapeSummary,
+    get_exchanges_async,
+    scrape_instruments_async,
+)
 
 
 async def main():
     exchanges = await get_exchanges_async()
-    async for instrument in scrape_instruments_async(page_size=500):
-        print(instrument)
+    async for item in scrape_instruments_async(page_size=500):
+        if isinstance(item, InstrumentScrapeSummary):
+            print("Summary:", item.products)
+        else:
+            print(item)
 
     async for instrument in scrape_instruments_async(
         product_type=["STK"],
@@ -146,7 +156,11 @@ countries. `new_product` accepts `"all"` (default), `"T"`, or `"F"` to select
 all, new, or non-new products. These filters are sent to both the summary used
 to determine pages and the products requests. Requests use the live IB API and
 are not cached or persisted. Product page sizes must be 100, 200, 300, 400, or
-500.
+500. Both instrument scrape iterators yield an `InstrumentScrapeSummary`
+tagged event first (`event == "summary"`, with `products` containing
+`InstrumentSummaryItem` values), before requesting product pages, followed by
+`Instrument` objects. The persistence API invokes `on_summary` with this event
+before its per-record `on_progress` callback.
 
 ### Live integration tests
 

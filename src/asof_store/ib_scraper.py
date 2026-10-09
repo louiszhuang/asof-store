@@ -10,6 +10,7 @@ from typing import Any, TextIO
 from ._abc import AsOfStoreABC
 from ._store import AsOfStore
 from .ib import (
+    InstrumentScrapeSummary,
     scrape_exchanges,
     scrape_exchanges_async,
     scrape_instruments,
@@ -22,6 +23,7 @@ type MissingPrimaryKeyStore = AsOfStoreABC[datetime, Instrument, NoneType]
 type ExchangeStore = AsOfStoreABC[datetime, tuple[str, str], Exchange]
 type MissingExchangePrimaryKeyStore = AsOfStoreABC[datetime, Exchange, NoneType]
 type ProgressCallback = Callable[["ScrapeReport"], None]
+type SummaryCallback = Callable[[InstrumentScrapeSummary], None]
 
 
 @dataclass
@@ -200,6 +202,7 @@ def scrape_and_store_instruments(
     print_changes: bool = False,
     output: TextIO | None = None,
     on_progress: ProgressCallback | None = None,
+    on_summary: SummaryCallback | None = None,
     client: Any | None = None,
 ) -> ScrapeReport:
     """Fetch IB instruments, save changes by conid, and return run counts."""
@@ -216,11 +219,15 @@ def scrape_and_store_instruments(
         end_page_number=end_page_number,
         timeout=timeout,
     )
-    for instrument in instruments:
+    for item in instruments:
+        if isinstance(item, InstrumentScrapeSummary):
+            if on_summary is not None:
+                on_summary(item)
+            continue
         _record_instrument(
             store,
             missing_primary_key_store,
-            instrument,
+            item,
             report,
             print_new=print_new,
             print_changes=print_changes,
@@ -247,27 +254,34 @@ async def async_scrape_and_store_instruments(
     print_changes: bool = False,
     output: TextIO | None = None,
     on_progress: ProgressCallback | None = None,
+    on_summary: SummaryCallback | None = None,
     client: Any | None = None,
 ) -> ScrapeReport:
     """Asynchronously fetch IB instruments and save changes by conid."""
     report = ScrapeReport(as_of=datetime.now(UTC))
     output = sys.stdout if output is None else output
-    instruments: AsyncIterator[Instrument] = scrape_instruments_async(
-        client,
-        domain=domain,
-        page_size=page_size,
-        product_type=product_type,
-        product_country=product_country,
-        new_product=new_product,
-        start_page_number=start_page_number,
-        end_page_number=end_page_number,
-        timeout=timeout,
+    instruments: AsyncIterator[Instrument | InstrumentScrapeSummary] = (
+        scrape_instruments_async(
+            client,
+            domain=domain,
+            page_size=page_size,
+            product_type=product_type,
+            product_country=product_country,
+            new_product=new_product,
+            start_page_number=start_page_number,
+            end_page_number=end_page_number,
+            timeout=timeout,
+        )
     )
-    async for instrument in instruments:
+    async for item in instruments:
+        if isinstance(item, InstrumentScrapeSummary):
+            if on_summary is not None:
+                on_summary(item)
+            continue
         _record_instrument(
             store,
             missing_primary_key_store,
-            instrument,
+            item,
             report,
             print_new=print_new,
             print_changes=print_changes,
@@ -402,6 +416,16 @@ def _print_progress(report: ScrapeReport, output: TextIO) -> None:
     )
 
 
+def _print_instrument_summary(
+    summary: InstrumentScrapeSummary,
+    output: TextIO,
+) -> None:
+    product_totals = ", ".join(
+        f"{item.product_type}={item.total_count}" for item in summary.products
+    )
+    print(f"Instrument summary: {product_totals}", file=output)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.progress_every < 1:
@@ -499,6 +523,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print_new=args.print_new,
                 print_changes=args.print_changes,
                 on_progress=report_progress,
+                on_summary=lambda summary: _print_instrument_summary(
+                    summary,
+                    sys.stderr,
+                ),
             )
         else:
             assert missing_exchange_primary_key_store is not None

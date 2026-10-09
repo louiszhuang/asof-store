@@ -1,13 +1,13 @@
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator, Iterator
 
 import pytest
 
 pytest.importorskip("zapros")
 
 from asof_store.ib import (
+    InstrumentScrapeSummary,
     get_exchanges,
     get_exchanges_async,
     get_instrument_summary,
@@ -154,17 +154,21 @@ def test_live_async_new_product_filter(new_product: NewProduct) -> None:
 
 
 def test_live_sync_scraper_yields_instruments() -> None:
-    instruments: Iterator[Instrument] = scrape_instruments(
+    items = scrape_instruments(
         page_size=_PAGE_SIZE,
         product_type=["STK"],
         product_country=["US"],
         timeout=_TIMEOUT,
     )
     try:
-        instrument = next(instruments)
+        summary = next(items)
+        instrument = next(items)
     finally:
-        instruments.close()
+        items.close()
 
+    assert isinstance(summary, InstrumentScrapeSummary)
+    assert summary.event == "summary"
+    assert any(item.product_type == "STK" for item in summary.products)
     assert isinstance(instrument, Instrument)
     assert instrument.model_dump(exclude_unset=True)
     assert instrument.product_type == "STK"
@@ -173,17 +177,21 @@ def test_live_sync_scraper_yields_instruments() -> None:
 
 def test_live_async_scraper_yields_instruments() -> None:
     async def exercise() -> None:
-        instruments: AsyncIterator[Instrument] = scrape_instruments_async(
+        instruments = scrape_instruments_async(
             page_size=_PAGE_SIZE,
             product_type=["STK"],
             product_country=["US"],
             timeout=_TIMEOUT,
         )
         try:
+            summary = await anext(instruments)
             instrument = await anext(instruments)
         finally:
             await instruments.aclose()
 
+        assert isinstance(summary, InstrumentScrapeSummary)
+        assert summary.event == "summary"
+        assert any(item.product_type == "STK" for item in summary.products)
         assert isinstance(instrument, Instrument)
         assert instrument.model_dump(exclude_unset=True)
         assert instrument.product_type == "STK"
