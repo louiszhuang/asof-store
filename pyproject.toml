@@ -1,6 +1,6 @@
 [project]
 name = "asof-store"
-version = "0.2.0"
+dynamic = ["version"]
 description = "asof store provides a simple and efficient way to store and retrieve data with versioning support. It allows users to save different versions of their data and access them as needed."
 readme = "README.md"
 authors = [{ name = "Louis Zhuang", email = "yzhuang@outlook.com" }]
@@ -25,13 +25,12 @@ ass = "asof_store:main"
 [tool.pytest.ini_options]
 markers = ["integration: tests that depend on live external services"]
 
-[build-system]
-requires = ["uv_build>=0.12.19,<0.13.0"]
-build-backend = "uv_build"
-
 [dependency-groups]
-dev = [
-    "prek>=0.5.5",
-    "ruff>=0.16.10",
-    "ty>=0.0.85",
-]
+dev = ["prek>=0.5.5", "ruff>=0.17.0", "ty>=0.0.86"]
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"

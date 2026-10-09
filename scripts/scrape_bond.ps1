@@ -1,8 +1,17 @@
-$i = 2101
+$i = 2306
 
-#Write-Host "正在处理页码: $i ..."
-#ass scrape-instruments --sql-uri postgresql://louis@fre.local/louis --product-type BOND --start-page-number $i
-#i -= 100
+Write-Host "正在处理页码: $i ..."
+ass scrape-instruments `
+  --sql-uri postgresql://louis@fre.local/louis `
+  --product-type BOND --start-page-number $i
+
+$i -= 100
+Write-Host "----------------------------------------"
+[Console]::Beep()
+
+exit
+
+Start-Sleep 60
 
 for (; $i -gt 0; $i -= 100) {
   $endPage = $i + 99
@@ -17,5 +26,6 @@ for (; $i -gt 0; $i -= 100) {
     --end-page-number $endPage
       
   Write-Host "----------------------------------------"
+  [Console]::Beep()
   Start-Sleep 60
 }
