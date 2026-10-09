@@ -76,13 +76,30 @@ def test_get_returns_none_when_no_prior_value_exists() -> None:
     assert store.get(10, "missing") is None
 
 
+def test_memory_store_requires_hashable_keys() -> None:
+    store = AsOfStore.from_memory()
+
+    with pytest.raises(TypeError):
+        store.put(10, ["item"], "value")
+
+
 def test_memory_store_supports_none_type_values() -> None:
     store = AsOfStore[int, str, NoneType].from_memory()
 
     assert store.put(10, "item", None) is True
+    assert store._versions["item"][1] is None
     assert store.put(10, "item", None) is False
     assert store.get(10, "item") is None
     assert store.put(20, "item", None) is False
+
+
+def test_memory_store_expands_history_after_none_values() -> None:
+    store = AsOfStore.from_memory()
+    assert store.put(10, "item", None) is True
+    assert store.put(20, "item", "later") is True
+
+    assert store.get(10, "item") is None
+    assert store.get(20, "item") == "later"
 
 
 def test_as_of_context_uses_fixed_timestamp() -> None:
@@ -129,6 +146,8 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
 
 
 def test_sqlite_store_supports_none_type_values() -> None:
+    from sqlalchemy import inspect
+
     store = _from_sql(
         "sqlite:///:memory:",
         "none_versions",
@@ -141,6 +160,12 @@ def test_sqlite_store_supports_none_type_values() -> None:
         assert store.put(10, "item", None) is False
         assert store.get(10, "item") is None
         assert store.put(20, "item", None) is False
+        assert {
+            column["name"]
+            for column in inspect(store._engine).get_columns("none_versions")
+        } == {"key", "timestamp"}
+        with pytest.raises(ValueError, match="must be greater than the latest timestamp"):
+            store.put(9, "item", None)
     finally:
         store.close()
 

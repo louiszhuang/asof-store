@@ -176,9 +176,7 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         self._key_type = key_type
         self._value_type = value_type
         metadata = MetaData()
-        self._versions = Table(
-            table_name,
-            metadata,
+        columns = [
             Column(
                 "timestamp",
                 _sql_type(timestamp_type),
@@ -189,13 +187,17 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
                 _sql_type(key_type),
                 nullable=False,
             ),
-            Column(
-                "value",
-                _sql_type(value_type),
-                nullable=True,
-            ),
-            PrimaryKeyConstraint("key", "timestamp"),
-        )
+        ]
+        if value_type is not type(None):
+            columns.append(
+                Column(
+                    "value",
+                    _sql_type(value_type),
+                    nullable=True,
+                )
+            )
+        columns.append(PrimaryKeyConstraint("key", "timestamp"))
+        self._versions = Table(table_name, metadata, *columns)
         metadata.create_all(self._engine)
 
     def close(self) -> None:
@@ -206,8 +208,11 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         encoded_key = _encode(self._key_type, key)
         encoded_value = _encode(self._value_type, value)
         with self._engine.begin() as connection:
+            latest_columns = [self._versions.c.timestamp]
+            if self._value_type is not type(None):
+                latest_columns.append(self._versions.c.value)
             latest = connection.execute(
-                select(self._versions.c.timestamp, self._versions.c.value)
+                select(*latest_columns)
                 .where(self._versions.c.key == encoded_key)
                 .order_by(self._versions.c.timestamp.desc())
                 .limit(1)
@@ -215,7 +220,11 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
 
             if latest is not None:
                 latest_timestamp = _decode(self._timestamp_type, latest.timestamp)
-                latest_value = _decode(self._value_type, latest.value)
+                latest_value = (
+                    None
+                    if self._value_type is type(None)
+                    else _decode(self._value_type, latest.value)
+                )
                 if as_of >= latest_timestamp and value == latest_value:
                     return False
                 if as_of <= latest_timestamp:
@@ -224,21 +233,23 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
                         f"timestamp {latest_timestamp!r} for key {key!r}"
                     )
 
-            connection.execute(
-                self._versions.insert().values(
-                    timestamp=timestamp,
-                    key=encoded_key,
-                    value=encoded_value,
-                )
-            )
+            insert_values = {"timestamp": timestamp, "key": encoded_key}
+            if self._value_type is not type(None):
+                insert_values["value"] = encoded_value
+            connection.execute(self._versions.insert().values(**insert_values))
             return True
 
     def get(self, as_of: Timestamp, key: Key) -> Value | None:
         timestamp = _encode(self._timestamp_type, as_of)
         encoded_key = _encode(self._key_type, key)
+        result_column = (
+            self._versions.c.timestamp
+            if self._value_type is type(None)
+            else self._versions.c.value
+        )
         with self._engine.connect() as connection:
             value = connection.scalar(
-                select(self._versions.c.value)
+                select(result_column)
                 .where(
                     self._versions.c.key == encoded_key,
                     self._versions.c.timestamp <= timestamp,
@@ -246,4 +257,6 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
                 .order_by(self._versions.c.timestamp.desc())
                 .limit(1)
             )
+        if self._value_type is type(None):
+            return None
         return _decode(self._value_type, value)

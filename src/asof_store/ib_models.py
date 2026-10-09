@@ -91,6 +91,7 @@ class ProductsByFiltersRequest(IBRequest):
 class Exchange(BaseModel):
     model_config = ConfigDict(
         extra="allow",
+        frozen=True,
         populate_by_name=True,
         json_schema_extra={"primary_key": ["id", "country_code"]},
     )
@@ -119,14 +120,14 @@ class ExchangeResponse(BaseModel):
 
 
 class InstrumentSummaryItem(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(extra="allow", frozen=True, populate_by_name=True)
 
     product_type: str = Field(alias="productType")
     total_count: int = Field(strict=True, ge=0, alias="totalCount")
 
 
 class Instrument(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(extra="allow", frozen=True, populate_by_name=True)
 
     product_type: str | None = Field(default=None, alias="type")
     symbol: str | None = None
@@ -176,6 +177,7 @@ class FundProductsRequest(IBRequest):
 class Fund(BaseModel):
     model_config = ConfigDict(
         extra="allow",
+        frozen=True,
         populate_by_name=True,
         json_schema_extra={"primary_key": "CONID"},
     )

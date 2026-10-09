@@ -527,11 +527,12 @@ def test_exchange_without_primary_key_uses_template_store(
     assert no_exchange_id.primary_key is None
 
 
-def test_memory_store_accepts_unhashable_instrument_keys() -> None:
+def test_instrument_is_hashable_as_memory_store_key() -> None:
     store = AsOfStore.from_memory()
     instrument = _instrument(None, "NO-ID")
     timestamp = datetime(2026, 1, 1, tzinfo=UTC)
 
+    assert hash(instrument) == hash(_instrument(None, "NO-ID"))
     assert store.put(timestamp, instrument, None) is True
     assert store.get(timestamp, _instrument(None, "NO-ID")) is None
     assert store.put(datetime(2026, 1, 2, tzinfo=UTC), instrument, None) is False

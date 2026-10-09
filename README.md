@@ -67,6 +67,8 @@ serialized with `model_dump(mode="json", exclude_unset=True)` and restored to
 their declared model type when read. Other Python types use pickle. SQL stores
 validate writes against the declared types. SQL-backed `datetime` values must
 be timezone-aware.
+When `value_type` is `NoneType`, SQL tables omit the value column; the memory
+backend does not allocate per-version value storage for `None` values.
 Use a distinct table name for each type combination; an existing table is not
 altered if its schema differs. Other Python values are stored with pickle, so
 only use SQL stores with databases you trust, since loading a database

@@ -1,6 +1,7 @@
 import os
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
+from types import NoneType
 from uuid import UUID, uuid4
 
 import pytest
@@ -132,6 +133,26 @@ def test_postgresql_tuples_round_trip_as_jsonb_arrays() -> None:
             ).one()
         assert stored_key == ["tenant", "item"]
         assert stored_value == ["first", "second"]
+    finally:
+        store._versions.drop(store._engine, checkfirst=True)
+        store.close()
+
+
+def test_postgresql_none_type_store_omits_value_column() -> None:
+    table_name = f"asof_none_{uuid4().hex}"
+    store = AsOfStore.from_sql(_POSTGRES_URI, table_name, int, str, NoneType)
+    try:
+        assert store.put(1, "item", None) is True
+        assert store.put(1, "item", None) is False
+        assert store.put(2, "item", None) is False
+        with pytest.raises(ValueError, match="must be greater than the latest timestamp"):
+            store.put(0, "item", None)
+        assert store.get(2, "item") is None
+
+        assert {
+            column["name"]
+            for column in inspect(store._engine).get_columns(table_name)
+        } == {"key", "timestamp"}
     finally:
         store._versions.drop(store._engine, checkfirst=True)
         store.close()
