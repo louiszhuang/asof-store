@@ -5,6 +5,7 @@ import pytest
 
 from asof_store.ib import (
     _EXCHANGES_URL,
+    _FUND_PRODUCTS_URL,
     _PRODUCTS_URL,
     _SUMMARY_URL,
     InstrumentScrapeItem,
@@ -12,18 +13,25 @@ from asof_store.ib import (
     InstrumentScrapeSummary,
     get_exchanges,
     get_exchanges_async,
+    get_funds_by_filters,
+    get_funds_by_filters_async,
     get_instrument_summary,
     get_instrument_summary_async,
     get_products_by_filters,
     get_products_by_filters_async,
     scrape_exchanges,
     scrape_exchanges_async,
+    scrape_funds,
+    scrape_funds_async,
     scrape_instruments,
     scrape_instruments_async,
 )
 from asof_store.ib_models import (
     Exchange,
     ExchangeResponse,
+    Fund,
+    FundProductsRequest,
+    FundProductsResponse,
     Instrument,
     InstrumentSummaryItem,
     InstrumentSummaryRequest,
@@ -80,6 +88,21 @@ class AsyncFakeClient:
 
 def _instrument_items(items: list[InstrumentScrapeItem]) -> list[Instrument]:
     return [item for item in items if isinstance(item, Instrument)]
+
+
+def _fund_payload(total: int, start: int, count: int) -> dict[str, Any]:
+    return {
+        "total": str(total),
+        "funds": [
+            {
+                "CONID": str(start + index),
+                "SYMBOL": f"FUND{start + index}",
+                "ISIN": f"US{start + index:010d}",
+                "NAME": f"Fund {start + index}",
+            }
+            for index in range(count)
+        ],
+    }
 
 
 def test_get_exchanges_calls_ib_endpoint_directly() -> None:
@@ -252,6 +275,126 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         "sortDirection": "asc",
         "sortField": "symbol",
     }
+
+
+def test_fund_request_model_serializes_ib_api_names() -> None:
+    request = FundProductsRequest()
+
+    assert request.model_dump(by_alias=True) == {
+        "domain": "uk",
+        "newProduct": "all",
+        "pageNumber": 1,
+        "pageSize": 100,
+        "productCountry": [],
+        "productSymbol": "",
+        "productType": ["FUND"],
+        "sortDirection": "asc",
+        "sortField": "symbol",
+        "residency": "",
+        "family": "",
+        "isFundRenamed": "",
+        "txnFee": "",
+        "iType": "",
+        "minInvestment": "",
+        "maxInvestment": "",
+        "identifier": "",
+        "accountType": "",
+        "currency": "",
+    }
+
+
+def test_fund_endpoint_sends_special_request_and_parses_funds() -> None:
+    response_body = {
+        "total": "1",
+        "funds": [
+            {
+                "INVEST_TYPE": "Stock",
+                "CONID": "514483865",
+                "ISIN": "AT0000708334",
+                "SYMBOL": "000070833",
+                "NAME": "Example fund",
+                "UNRECOGNIZED_IB_FIELD": "retained",
+            }
+        ],
+    }
+    client = FakeClient(lambda method, url, payload: FakeResponse(response_body))
+
+    response = get_funds_by_filters(
+        client,
+        page_number=2,
+        page_size=200,
+        product_country=["AT"],
+        product_symbol="ERSTE",
+        family="ERSTE",
+        i_type="Stock",
+    )
+
+    assert isinstance(response, FundProductsResponse)
+    assert response.total == 1
+    fund = response.funds[0]
+    assert isinstance(fund, Fund)
+    assert fund.primary_key == 514483865
+    assert fund.isin == "AT0000708334"
+    assert fund.model_extra == {"UNRECOGNIZED_IB_FIELD": "retained"}
+    assert client.requests[0][1] == _FUND_PRODUCTS_URL
+    payload = client.requests[0][2]["payload"]
+    assert payload["productType"] == ["FUND"]
+    assert payload["pageNumber"] == 2
+    assert payload["pageSize"] == 200
+    assert payload["productCountry"] == ["AT"]
+    assert payload["productSymbol"] == "ERSTE"
+    assert payload["family"] == "ERSTE"
+    assert payload["iType"] == "Stock"
+
+
+def test_scrape_funds_fetches_reported_pages() -> None:
+    requested_pages: list[int] = []
+    completed_pages: list[tuple[int, int]] = []
+
+    def respond(method: str, url: str, payload: Any) -> FakeResponse:
+        requested_pages.append(payload["pageNumber"])
+        start = (payload["pageNumber"] - 1) * 100 + 1
+        count = min(100, 101 - (payload["pageNumber"] - 1) * 100)
+        return FakeResponse(_fund_payload(101, start, count))
+
+    funds = list(
+        scrape_funds(
+            FakeClient(respond),
+            page_size=100,
+            on_page=lambda page, count: completed_pages.append((page, count)),
+        )
+    )
+
+    assert requested_pages == [1, 2]
+    assert completed_pages == [(1, 100), (2, 1)]
+    assert len(funds) == 101
+    assert funds[0].primary_key == 1
+    assert funds[-1].primary_key == 101
+
+
+def test_fund_endpoint_async_wrapper_and_scraper() -> None:
+    async def exercise() -> None:
+        client = AsyncFakeClient(
+            lambda method, url, payload: FakeResponse(_fund_payload(1, 42, 1))
+        )
+        response = await get_funds_by_filters_async(client)
+        funds = [
+            fund
+            async for fund in scrape_funds_async(
+                AsyncFakeClient(
+                    lambda method, url, payload: FakeResponse(
+                        _fund_payload(1, 42, 1)
+                    )
+                )
+            )
+        ]
+
+        assert response.funds[0].conid == 42
+        assert [fund.primary_key for fund in funds] == [42]
+        assert client.requests[0][1] == _FUND_PRODUCTS_URL
+        assert client.requests[0][2]["payload"]["productType"] == ["FUND"]
+
+    asyncio.run(exercise())
 
 
 def test_scrape_instruments_fetches_each_page_for_each_type() -> None:

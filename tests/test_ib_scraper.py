@@ -9,7 +9,7 @@ import pytest
 
 from asof_store import AsOfStore, ib_scraper
 from asof_store.ib import InstrumentScrapePage, InstrumentScrapeSummary
-from asof_store.ib_models import Exchange, Instrument, InstrumentSummaryItem
+from asof_store.ib_models import Exchange, Fund, Instrument, InstrumentSummaryItem
 
 
 def _instrument(
@@ -646,3 +646,101 @@ def test_exchange_cli_uses_tuple_key_and_model(
     assert captured["missing_primary_key_store"] is store
     assert store.closed is True
     assert "Scrape complete: total=1, new_with_primary_key=1" in capsys.readouterr().err
+
+
+def test_scrape_and_store_funds_classifies_records_and_prints_new(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = AsOfStore.from_memory()
+    missing_primary_key_store = AsOfStore.from_memory()
+    output = StringIO()
+    funds = [
+        Fund.model_validate({"CONID": "42", "SYMBOL": "FUND"}),
+        Fund.model_validate({"SYMBOL": "NO-ID"}),
+    ]
+
+    def fake_scrape(*args: Any, **kwargs: Any):
+        yield from funds
+        kwargs["on_page"](1, len(funds))
+
+    monkeypatch.setattr(ib_scraper, "scrape_funds", fake_scrape)
+    progress: list[ib_scraper.ScrapeReport] = []
+
+    report = ib_scraper.scrape_and_store_funds(
+        store,
+        missing_primary_key_store=missing_primary_key_store,
+        print_new=True,
+        output=output,
+        on_progress=progress.append,
+    )
+
+    assert report.total == 2
+    assert report.new_with_primary_key == 1
+    assert report.new_without_primary_key == 1
+    assert progress[0].product_type == "FUND"
+    assert progress[0].instrument_range == (1, 2)
+    assert store.get(report.as_of, 42) == funds[0]
+    assert missing_primary_key_store.put(report.as_of, funds[1], None) is False
+    printed = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [item["event"] for item in printed] == ["new", "new"]
+    assert printed[0]["fund"]["CONID"] == 42
+
+
+def test_fund_cli_uses_conid_and_template_stores(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def close(self) -> None:
+            pass
+
+    created: list[tuple[Any, ...]] = []
+    store = FakeStore()
+    monkeypatch.setattr(
+        AsOfStore,
+        "from_sql",
+        classmethod(lambda cls, *args: created.append(args) or store),
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_scrape(store_arg: Any, **kwargs: Any) -> ib_scraper.ScrapeReport:
+        captured.update(kwargs)
+        return ib_scraper.ScrapeReport(
+            as_of=datetime(2026, 1, 1, tzinfo=UTC),
+            new_with_primary_key=1,
+        )
+
+    monkeypatch.setattr(ib_scraper, "scrape_and_store_funds", fake_scrape)
+
+    result = ib_scraper.main(
+        [
+            "scrape-funds",
+            "--sql-uri",
+            "sqlite:///:memory:",
+            "--product-country",
+            "US",
+            "--product-symbol",
+            "ABC",
+            "--start-page-number",
+            "2",
+            "--end-page-number",
+            "5",
+        ]
+    )
+
+    assert result == 0
+    assert created == [
+        ("sqlite:///:memory:", "ib_funds", datetime, int, Fund),
+        (
+            "sqlite:///:memory:",
+            "ib_fund_templates",
+            datetime,
+            Fund,
+            NoneType,
+        ),
+    ]
+    assert captured["product_country"] == ["US"]
+    assert captured["product_symbol"] == "ABC"
+    assert captured["start_page_number"] == 2
+    assert captured["end_page_number"] == 5
+    assert "Scrape complete: total=1" in capsys.readouterr().err

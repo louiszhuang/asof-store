@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -14,6 +14,9 @@ except ImportError as exc:
 from .ib_models import (
     Exchange,
     ExchangeResponse,
+    Fund,
+    FundProductsRequest,
+    FundProductsResponse,
     Instrument,
     InstrumentSummaryItem,
     InstrumentSummaryRequest,
@@ -28,6 +31,7 @@ _BASE_URL = "https://www.interactivebrokers.co.uk/webrest"
 _EXCHANGES_URL = f"{_BASE_URL}/exchanges/"
 _SUMMARY_URL = f"{_BASE_URL}/search/product-types/summary"
 _PRODUCTS_URL = f"{_BASE_URL}/search/products-by-filters"
+_FUND_PRODUCTS_URL = f"{_BASE_URL}/scanner/funds/products"
 
 
 @dataclass(frozen=True)
@@ -344,6 +348,233 @@ async def get_products_by_filters_async(
             timeout=timeout,
         )
     return ProductsResponse.model_validate(result)
+
+
+def get_funds_by_filters(
+    client: Any | None = None,
+    *,
+    page_number: int = 1,
+    page_size: int = 100,
+    domain: str = "uk",
+    new_product: NewProduct = "all",
+    product_country: list[str] | None = None,
+    product_symbol: str = "",
+    sort_direction: Literal["asc", "desc"] = "asc",
+    sort_field: str = "symbol",
+    residency: str = "",
+    family: str = "",
+    is_fund_renamed: str = "",
+    txn_fee: str = "",
+    i_type: str = "",
+    min_investment: str = "",
+    max_investment: str = "",
+    identifier: str = "",
+    account_type: str = "",
+    currency: str = "",
+    timeout: float = 30,
+) -> FundProductsResponse:
+    """Return one page of IB funds."""
+    if page_number < 1:
+        raise ValueError("page_number must be at least 1")
+    _validate_page_size(page_size)
+    _validate_timeout(timeout)
+
+    payload = FundProductsRequest(
+        domain=domain,
+        new_product=new_product,
+        page_number=page_number,
+        page_size=page_size,
+        product_country=[] if product_country is None else product_country,
+        product_symbol=product_symbol,
+        product_type=["FUND"],
+        sort_direction=sort_direction,
+        sort_field=sort_field,
+        residency=residency,
+        family=family,
+        is_fund_renamed=is_fund_renamed,
+        txn_fee=txn_fee,
+        investment_type=i_type,
+        min_investment=min_investment,
+        max_investment=max_investment,
+        identifier=identifier,
+        account_type=account_type,
+        currency=currency,
+    ).model_dump(by_alias=True)
+    with _using_client(client) as active_client:
+        result = _request_json(
+            active_client,
+            "POST",
+            _FUND_PRODUCTS_URL,
+            payload=payload,
+            timeout=timeout,
+        )
+    return FundProductsResponse.model_validate(result)
+
+
+async def get_funds_by_filters_async(
+    client: Any | None = None,
+    *,
+    page_number: int = 1,
+    page_size: int = 100,
+    domain: str = "uk",
+    new_product: NewProduct = "all",
+    product_country: list[str] | None = None,
+    product_symbol: str = "",
+    sort_direction: Literal["asc", "desc"] = "asc",
+    sort_field: str = "symbol",
+    residency: str = "",
+    family: str = "",
+    is_fund_renamed: str = "",
+    txn_fee: str = "",
+    i_type: str = "",
+    min_investment: str = "",
+    max_investment: str = "",
+    identifier: str = "",
+    account_type: str = "",
+    currency: str = "",
+    timeout: float = 30,
+) -> FundProductsResponse:
+    """Asynchronously return one page of IB funds."""
+    if page_number < 1:
+        raise ValueError("page_number must be at least 1")
+    _validate_page_size(page_size)
+    _validate_timeout(timeout)
+
+    payload = FundProductsRequest(
+        domain=domain,
+        new_product=new_product,
+        page_number=page_number,
+        page_size=page_size,
+        product_country=[] if product_country is None else product_country,
+        product_symbol=product_symbol,
+        product_type=["FUND"],
+        sort_direction=sort_direction,
+        sort_field=sort_field,
+        residency=residency,
+        family=family,
+        is_fund_renamed=is_fund_renamed,
+        txn_fee=txn_fee,
+        investment_type=i_type,
+        min_investment=min_investment,
+        max_investment=max_investment,
+        identifier=identifier,
+        account_type=account_type,
+        currency=currency,
+    ).model_dump(by_alias=True)
+    async with _using_async_client(client) as active_client:
+        result = await _request_json_async(
+            active_client,
+            "POST",
+            _FUND_PRODUCTS_URL,
+            payload=payload,
+            timeout=timeout,
+        )
+    return FundProductsResponse.model_validate(result)
+
+
+def scrape_funds(
+    client: Any | None = None,
+    *,
+    page_size: int = 100,
+    start_page_number: int = 1,
+    end_page_number: int | None = None,
+    on_page: Callable[[int, int], None] | None = None,
+    timeout: float = 30,
+    **filters: Any,
+) -> Generator[Fund]:
+    """Yield IB funds from each page reported by the funds endpoint."""
+    if start_page_number < 1:
+        raise ValueError("start_page_number must be at least 1")
+    if end_page_number is not None and end_page_number < start_page_number:
+        raise ValueError("end_page_number must be at least start_page_number")
+    _validate_page_size(page_size)
+    _validate_timeout(timeout)
+
+    with _using_client(client) as active_client:
+        page_number = start_page_number
+        response = get_funds_by_filters(
+            active_client,
+            page_number=page_number,
+            page_size=page_size,
+            timeout=timeout,
+            **filters,
+        )
+        last_page_number = (response.total + page_size - 1) // page_size
+        if end_page_number is not None:
+            last_page_number = min(last_page_number, end_page_number)
+
+        while page_number <= last_page_number:
+            expected_count = min(page_size, response.total - (page_number - 1) * page_size)
+            if len(response.funds) != expected_count:
+                raise ValueError(
+                    f"Unexpected fund count on page {page_number}: "
+                    f"expected {expected_count}, received {len(response.funds)}"
+                )
+            yield from response.funds
+            if on_page is not None:
+                on_page(page_number, expected_count)
+            page_number += 1
+            if page_number <= last_page_number:
+                response = get_funds_by_filters(
+                    active_client,
+                    page_number=page_number,
+                    page_size=page_size,
+                    timeout=timeout,
+                    **filters,
+                )
+
+
+async def scrape_funds_async(
+    client: Any | None = None,
+    *,
+    page_size: int = 100,
+    start_page_number: int = 1,
+    end_page_number: int | None = None,
+    on_page: Callable[[int, int], None] | None = None,
+    timeout: float = 30,
+    **filters: Any,
+) -> AsyncGenerator[Fund]:
+    """Asynchronously yield IB funds from each reported page."""
+    if start_page_number < 1:
+        raise ValueError("start_page_number must be at least 1")
+    if end_page_number is not None and end_page_number < start_page_number:
+        raise ValueError("end_page_number must be at least start_page_number")
+    _validate_page_size(page_size)
+    _validate_timeout(timeout)
+
+    async with _using_async_client(client) as active_client:
+        page_number = start_page_number
+        response = await get_funds_by_filters_async(
+            active_client,
+            page_number=page_number,
+            page_size=page_size,
+            timeout=timeout,
+            **filters,
+        )
+        last_page_number = (response.total + page_size - 1) // page_size
+        if end_page_number is not None:
+            last_page_number = min(last_page_number, end_page_number)
+
+        while page_number <= last_page_number:
+            expected_count = min(page_size, response.total - (page_number - 1) * page_size)
+            if len(response.funds) != expected_count:
+                raise ValueError(
+                    f"Unexpected fund count on page {page_number}: "
+                    f"expected {expected_count}, received {len(response.funds)}"
+                )
+            for fund in response.funds:
+                yield fund
+            if on_page is not None:
+                on_page(page_number, expected_count)
+            page_number += 1
+            if page_number <= last_page_number:
+                response = await get_funds_by_filters_async(
+                    active_client,
+                    page_number=page_number,
+                    page_size=page_size,
+                    timeout=timeout,
+                    **filters,
+                )
 
 
 def scrape_instruments(

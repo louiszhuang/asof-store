@@ -92,16 +92,18 @@ provided. Pass an existing sync or async client to reuse its connection.
 `get_exchanges` fetches the exchange catalogue, while `get_instrument_summary`
 fetches product counts by type. `get_products_by_filters` fetches one page, and
 `scrape_instruments` fetches every reported page and yields instruments.
+`get_funds_by_filters` and `scrape_funds` use IB's dedicated funds endpoint.
 Async equivalents have an `_async` suffix; `scrape_instruments_async` is an
 async iterator.
 
 The API returns Pydantic models: `ExchangeResponse`, `InstrumentSummaryItem`,
-`ProductsResponse`, and `Instrument`. Request models
-`InstrumentSummaryRequest` and `ProductsByFiltersRequest` serialize field names
-to the format expected by IB. Instrument models allow additional IB fields so
-new or product-specific response fields are retained. `Instrument.conid` is
-the IB contract ID and is marked as the primary key; some IB product types omit
-it, in which case `Instrument.primary_key` returns `None`. Exchanges use the
+`ProductsResponse`, `Instrument`, and `Fund`. Request models
+`InstrumentSummaryRequest`, `ProductsByFiltersRequest`, and
+`FundProductsRequest` serialize field names to the format expected by IB.
+Instrument and fund models allow additional IB fields so new or
+product-specific response fields are retained. `Instrument.conid` and
+`Fund.conid` are IB contract IDs and are used as their primary keys. Instruments
+or funds without a contract ID have `primary_key == None`. Exchanges use the
 composite primary key `(id, country_code)`.
 
 ```python
@@ -186,6 +188,7 @@ uv run pytest -m integration tests/integration/test_asof_store_postgres.py
 
 Without the corresponding environment variable, live integration tests are
 skipped and the default test suite makes no live IB or PostgreSQL requests.
+The live IB tests also exercise the dedicated funds endpoint.
 
 ### Scraping instruments into an as-of store
 
@@ -214,6 +217,24 @@ table, `ib_instrument_templates` by default, keyed by the complete
 `Instrument` model; choose another table with
 `--missing-primary-key-table-name`.
 
+### Scraping funds into an as-of store
+
+IB uses a dedicated funds scanner endpoint and returns a `total` count with
+each page of funds. Scrape and persist those pages with:
+
+```powershell
+uv run ass scrape-funds --sql-uri "sqlite:///ib-funds.db"
+```
+
+The primary table defaults to `ib_funds`, keyed by each fund's `CONID`; funds
+without a contract ID are stored in `ib_fund_templates` by default. Use
+`--table-name` and `--missing-primary-key-table-name` to select different
+tables. `--product-country` can be repeated, and `--product-symbol`,
+`--new-product`, `--page-size`, `--start-page-number`, and `--end-page-number`
+filter or limit the scrape. Progress is reported after each page by default;
+`--progress-every` selects how many pages to skip between reports. New records
+and changes can be printed with `--print-new` and `--print-changes`.
+
 Scrape and store the exchange catalogue with:
 
 ```powershell
@@ -235,6 +256,10 @@ Use `scrape_and_store_exchanges(store, ...)` or
 `async_scrape_and_store_exchanges(store, ...)` for exchanges, with an
 `AsOfStore[datetime, tuple[str, str], Exchange]` and a separate
 `AsOfStore[datetime, Exchange, NoneType]` for exchanges missing key components.
+Use `scrape_and_store_funds(store, ...)` or
+`async_scrape_and_store_funds(store, ...)` with an
+`AsOfStore[datetime, int, Fund]` and a separate
+`AsOfStore[datetime, Fund, NoneType]` for funds without a contract ID.
 
 ## Publishing
 

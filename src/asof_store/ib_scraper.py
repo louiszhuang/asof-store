@@ -14,15 +14,19 @@ from .ib import (
     InstrumentScrapeSummary,
     scrape_exchanges,
     scrape_exchanges_async,
+    scrape_funds,
+    scrape_funds_async,
     scrape_instruments,
     scrape_instruments_async,
 )
-from .ib_models import Exchange, Instrument, NewProduct
+from .ib_models import Exchange, Fund, Instrument, NewProduct
 
 type InstrumentStore = AsOfStoreABC[datetime, int, Instrument]
 type MissingPrimaryKeyStore = AsOfStoreABC[datetime, Instrument, NoneType]
 type ExchangeStore = AsOfStoreABC[datetime, tuple[str, str], Exchange]
 type MissingExchangePrimaryKeyStore = AsOfStoreABC[datetime, Exchange, NoneType]
+type FundStore = AsOfStoreABC[datetime, int, Fund]
+type MissingFundPrimaryKeyStore = AsOfStoreABC[datetime, Fund, NoneType]
 type ProgressCallback = Callable[["ScrapeReport"], None]
 type SummaryCallback = Callable[[InstrumentScrapeSummary], None]
 
@@ -59,6 +63,14 @@ def _instrument_json(instrument: Instrument) -> dict[str, object]:
 
 def _exchange_json(exchange: Exchange) -> dict[str, object]:
     return exchange.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_unset=True,
+    )
+
+
+def _fund_json(fund: Fund) -> dict[str, object]:
+    return fund.model_dump(
         mode="json",
         by_alias=True,
         exclude_unset=True,
@@ -177,6 +189,55 @@ def _record_instrument(
     timestamp = max(datetime.now(UTC), report.as_of + timedelta(microseconds=1))
     report.as_of = timestamp
     store.put(timestamp, primary_key, instrument)
+    report.changed_with_primary_key += 1
+    if print_changes:
+        _print_json(
+            output,
+            {
+                "event": "changed",
+                "primary_key": primary_key,
+                "changes": changes,
+            },
+        )
+
+
+def _record_fund(
+    store: FundStore,
+    missing_primary_key_store: MissingFundPrimaryKeyStore,
+    fund: Fund,
+    report: ScrapeReport,
+    *,
+    print_new: bool,
+    print_changes: bool,
+    output: TextIO,
+) -> None:
+    primary_key = fund.primary_key
+    if primary_key is None:
+        if missing_primary_key_store.put(report.as_of, fund, None):
+            report.new_without_primary_key += 1
+            if print_new:
+                _print_json(output, {"event": "new", "fund": _fund_json(fund)})
+        else:
+            report.unchanged_without_primary_key += 1
+        return
+
+    current = _fund_json(fund)
+    previous = store.get(report.as_of, primary_key)
+    if previous is None:
+        store.put(report.as_of, primary_key, fund)
+        report.new_with_primary_key += 1
+        if print_new:
+            _print_json(output, {"event": "new", "fund": current})
+        return
+
+    changes = _instrument_diff(_fund_json(previous), current)
+    if not changes:
+        report.unchanged_with_primary_key += 1
+        return
+
+    timestamp = max(datetime.now(UTC), report.as_of + timedelta(microseconds=1))
+    report.as_of = timestamp
+    store.put(timestamp, primary_key, fund)
     report.changed_with_primary_key += 1
     if print_changes:
         _print_json(
@@ -319,6 +380,122 @@ async def async_scrape_and_store_instruments(
     return report
 
 
+def scrape_and_store_funds(
+    store: FundStore,
+    *,
+    missing_primary_key_store: MissingFundPrimaryKeyStore,
+    domain: str = "uk",
+    page_size: int = 100,
+    product_country: list[str] | None = None,
+    product_symbol: str = "",
+    new_product: NewProduct = "all",
+    start_page_number: int = 1,
+    end_page_number: int | None = None,
+    timeout: float = 30,
+    print_new: bool = False,
+    print_changes: bool = False,
+    output: TextIO | None = None,
+    on_progress: ProgressCallback | None = None,
+    client: Any | None = None,
+) -> ScrapeReport:
+    """Fetch IB funds, save changes by conid, and return run counts."""
+    report = ScrapeReport(as_of=datetime.now(UTC))
+    output = sys.stdout if output is None else output
+
+    def report_page(page_number: int, fund_count: int) -> None:
+        if on_progress is None:
+            return
+        first = (page_number - 1) * page_size + 1
+        on_progress(
+            replace(
+                report,
+                product_type="FUND",
+                instrument_range=(first, first + fund_count - 1),
+            )
+        )
+
+    for fund in scrape_funds(
+        client,
+        domain=domain,
+        page_size=page_size,
+        product_country=product_country,
+        product_symbol=product_symbol,
+        new_product=new_product,
+        start_page_number=start_page_number,
+        end_page_number=end_page_number,
+        on_page=report_page,
+        timeout=timeout,
+    ):
+        _record_fund(
+            store,
+            missing_primary_key_store,
+            fund,
+            report,
+            print_new=print_new,
+            print_changes=print_changes,
+            output=output,
+        )
+    return report
+
+
+async def async_scrape_and_store_funds(
+    store: FundStore,
+    *,
+    missing_primary_key_store: MissingFundPrimaryKeyStore,
+    domain: str = "uk",
+    page_size: int = 100,
+    product_country: list[str] | None = None,
+    product_symbol: str = "",
+    new_product: NewProduct = "all",
+    start_page_number: int = 1,
+    end_page_number: int | None = None,
+    timeout: float = 30,
+    print_new: bool = False,
+    print_changes: bool = False,
+    output: TextIO | None = None,
+    on_progress: ProgressCallback | None = None,
+    client: Any | None = None,
+) -> ScrapeReport:
+    """Asynchronously fetch and save IB funds by conid."""
+    report = ScrapeReport(as_of=datetime.now(UTC))
+    output = sys.stdout if output is None else output
+
+    def report_page(page_number: int, fund_count: int) -> None:
+        if on_progress is None:
+            return
+        first = (page_number - 1) * page_size + 1
+        on_progress(
+            replace(
+                report,
+                product_type="FUND",
+                instrument_range=(first, first + fund_count - 1),
+            )
+        )
+
+    async for fund in scrape_funds_async(
+        client,
+        domain=domain,
+        page_size=page_size,
+        product_country=product_country,
+        product_symbol=product_symbol,
+        new_product=new_product,
+        start_page_number=start_page_number,
+        end_page_number=end_page_number,
+        on_page=report_page,
+        timeout=timeout,
+    ):
+        _record_fund(
+            store,
+            missing_primary_key_store,
+            fund,
+            report,
+            print_new=print_new,
+            print_changes=print_changes,
+            output=output,
+        )
+    return report
+
+
 def scrape_and_store_exchanges(
     store: ExchangeStore,
     *,
@@ -388,9 +565,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "scrape-exchanges",
         help="scrape IB exchanges into a SQL-backed as-of store",
     )
+    funds_parser = commands.add_parser(
+        "scrape-funds",
+        help="scrape IB funds into a SQL-backed as-of store",
+    )
     for subparser, default_table in (
         (instruments_parser, "ib_instruments"),
         (exchanges_parser, "ib_exchanges"),
+        (funds_parser, "ib_funds"),
     ):
         subparser.add_argument("--sql-uri", required=True)
         subparser.add_argument("--table-name", default=default_table)
@@ -408,6 +590,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--missing-primary-key-table-name",
         default="ib_exchange_templates",
         help="table for exchanges missing id or country_code",
+    )
+    funds_parser.add_argument(
+        "--missing-primary-key-table-name",
+        default="ib_fund_templates",
+        help="table for funds that do not have a conid",
     )
     instruments_parser.add_argument("--domain", default="uk")
     instruments_parser.add_argument("--page-size", type=int, default=500)
@@ -428,12 +615,24 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("all", "T", "F"),
         default="all",
     )
+    funds_parser.add_argument("--domain", default="uk")
+    funds_parser.add_argument("--page-size", type=int, default=100)
+    funds_parser.add_argument("--product-country", action="append")
+    funds_parser.add_argument("--product-symbol", default="")
+    funds_parser.add_argument(
+        "--new-product",
+        choices=("all", "T", "F"),
+        default="all",
+    )
+    funds_parser.add_argument("--start-page-number", type=int, default=1)
+    funds_parser.add_argument("--end-page-number", type=int)
     return parser
 
 
 def _print_progress(report: ScrapeReport, output: TextIO) -> None:
+    item_label = "funds" if report.product_type == "FUND" else "instruments"
     instrument_range = (
-        "instruments "
+        f"{item_label} "
         f"{report.instrument_range[0]}-{report.instrument_range[1]} "
         f"({report.product_type})"
         if report.instrument_range is not None
@@ -485,16 +684,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError(
                 "--end-page-number must be at least --start-page-number"
             )
+    elif args.command == "scrape-funds":
+        if args.table_name == args.missing_primary_key_table_name:
+            raise ValueError(
+                "--table-name and --missing-primary-key-table-name must differ"
+            )
+        if args.start_page_number < 1:
+            raise ValueError("--start-page-number must be at least 1")
+        if args.end_page_number is not None and (
+            args.end_page_number < args.start_page_number
+        ):
+            raise ValueError(
+                "--end-page-number must be at least --start-page-number"
+            )
     elif args.table_name == args.missing_primary_key_table_name:
         raise ValueError(
             "--table-name and --missing-primary-key-table-name must differ"
         )
 
     is_instruments = args.command == "scrape-instruments"
-    key_type = int if is_instruments else tuple
-    value_type = Instrument if is_instruments else Exchange
+    is_funds = args.command == "scrape-funds"
+    key_type = int if is_instruments or is_funds else tuple
+    value_type = Instrument if is_instruments else Fund if is_funds else Exchange
     missing_primary_key_store: MissingPrimaryKeyStore | None = None
     missing_exchange_primary_key_store: MissingExchangePrimaryKeyStore | None = None
+    missing_fund_primary_key_store: MissingFundPrimaryKeyStore | None = None
     try:
         store = AsOfStore.from_sql(
             args.sql_uri,
@@ -510,6 +724,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.missing_primary_key_table_name,
                     datetime,
                     Instrument,
+                    NoneType,
+                )
+            except Exception:
+                store.close()
+                raise
+        elif is_funds:
+            try:
+                missing_fund_primary_key_store = AsOfStore.from_sql(
+                    args.sql_uri,
+                    args.missing_primary_key_table_name,
+                    datetime,
+                    Fund,
                     NoneType,
                 )
             except Exception:
@@ -566,6 +792,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                     sys.stderr,
                 ),
             )
+        elif is_funds:
+            assert missing_fund_primary_key_store is not None
+            result = scrape_and_store_funds(
+                store,
+                missing_primary_key_store=missing_fund_primary_key_store,
+                domain=args.domain,
+                page_size=args.page_size,
+                product_country=args.product_country,
+                product_symbol=args.product_symbol,
+                new_product=args.new_product,
+                start_page_number=args.start_page_number,
+                end_page_number=args.end_page_number,
+                timeout=args.timeout,
+                print_new=args.print_new,
+                print_changes=args.print_changes,
+                on_progress=report_progress,
+            )
         else:
             assert missing_exchange_primary_key_store is not None
             result = scrape_and_store_exchanges(
@@ -595,6 +838,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             missing_primary_key_store.close()
         if missing_exchange_primary_key_store is not None:
             missing_exchange_primary_key_store.close()
+        if missing_fund_primary_key_store is not None:
+            missing_fund_primary_key_store.close()
     return 0
 
 

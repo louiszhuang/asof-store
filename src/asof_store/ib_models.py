@@ -157,3 +157,60 @@ class ProductsResponse(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     products: list[Instrument]
+
+
+class FundProductsRequest(IBRequest):
+    product_type: list[str] = Field(default_factory=lambda: ["FUND"], alias="productType")
+    residency: str = ""
+    family: str = ""
+    is_fund_renamed: str = Field(default="", alias="isFundRenamed")
+    txn_fee: str = Field(default="", alias="txnFee")
+    investment_type: str = Field(default="", alias="iType")
+    min_investment: str = Field(default="", alias="minInvestment")
+    max_investment: str = Field(default="", alias="maxInvestment")
+    identifier: str = ""
+    account_type: str = Field(default="", alias="accountType")
+    currency: str = ""
+
+
+class Fund(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+        json_schema_extra={"primary_key": "CONID"},
+    )
+
+    invest_type: str | None = Field(default=None, alias="INVEST_TYPE")
+    assets: str | None = Field(default=None, alias="ASSETS")
+    lt: str | None = Field(default=None, alias="LT")
+    conid: int | None = Field(default=None, alias="CONID")
+    expense_ratio: str | None = Field(default=None, alias="EXPENSE_RATIO")
+    txn: str | None = Field(default=None, alias="TXN")
+    sharpe: str | None = Field(default=None, alias="SHARPE")
+    performance: str | None = Field(default=None, alias="PERF")
+    isin: str | None = Field(default=None, alias="ISIN")
+    initial_investment: str | None = Field(default=None, alias="INITIAL_INVEST")
+    family: str | None = Field(default=None, alias="FAMILY")
+    name: str | None = Field(default=None, alias="NAME")
+    lipper: str | None = Field(default=None, alias="LIPPER")
+    cusip: str | None = Field(default=None, alias="CUSIP")
+    description_jp: str | None = Field(default=None, alias="DESCR_JP")
+    symbol: str | None = Field(default=None, alias="SYMBOL")
+    share_class: str | None = Field(default=None, alias="SHARE_CLASS")
+    currency: str | None = Field(default=None, alias="ICUR")
+    management_fee: str | None = Field(default=None, alias="MGTFEE")
+    esg: str | None = Field(default=None, alias="ESG")
+    exchange: str | None = Field(default=None, alias="EXCHANGE")
+    fund_geography: str | None = Field(default=None, alias="FUND_GEO")
+
+    @property
+    def primary_key(self) -> int | None:
+        """Return IB's contract ID when present."""
+        return self.conid
+
+
+class FundProductsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    total: int = Field(ge=0)
+    funds: list[Fund]

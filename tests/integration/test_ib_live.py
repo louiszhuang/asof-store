@@ -10,6 +10,8 @@ from asof_store.ib import (
     InstrumentScrapeSummary,
     get_exchanges,
     get_exchanges_async,
+    get_funds_by_filters,
+    get_funds_by_filters_async,
     get_instrument_summary,
     get_instrument_summary_async,
     get_products_by_filters,
@@ -19,6 +21,7 @@ from asof_store.ib import (
 )
 from asof_store.ib_models import (
     ExchangeResponse,
+    Fund,
     Instrument,
     NewProduct,
     ProductsResponse,
@@ -125,6 +128,30 @@ def test_live_new_product_filter(new_product: NewProduct) -> None:
     )
     _assert_products(products, total_count=total_count)
     assert all(product.country == "US" for product in products.products)
+
+
+def test_live_sync_fund_endpoint() -> None:
+    response = get_funds_by_filters(page_size=_PAGE_SIZE, timeout=_TIMEOUT)
+
+    assert response.total > 0
+    assert len(response.funds) == min(_PAGE_SIZE, response.total)
+    assert all(isinstance(fund, Fund) for fund in response.funds)
+    assert all(fund.primary_key is not None for fund in response.funds)
+
+
+def test_live_async_fund_endpoint() -> None:
+    async def exercise() -> None:
+        response = await get_funds_by_filters_async(
+            page_size=_PAGE_SIZE,
+            timeout=_TIMEOUT,
+        )
+
+        assert response.total > 0
+        assert len(response.funds) == min(_PAGE_SIZE, response.total)
+        assert all(isinstance(fund, Fund) for fund in response.funds)
+        assert all(fund.primary_key is not None for fund in response.funds)
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("new_product", ["T", "F"])
