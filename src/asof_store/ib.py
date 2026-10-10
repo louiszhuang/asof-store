@@ -25,6 +25,7 @@ from .ib_models import (
     ProductsByFiltersRequest,
     ProductsResponse,
     SortDirection,
+    product_id2name,
 )
 
 _SUMMARY_ADAPTER = TypeAdapter(list[InstrumentSummaryItem])
@@ -34,6 +35,15 @@ _EXCHANGES_URL = f"{_BASE_URL}/exchanges/"
 _SUMMARY_URL = f"{_BASE_URL}/search/product-types/summary"
 _PRODUCTS_URL = f"{_BASE_URL}/search/products-by-filters"
 _FUND_PRODUCTS_URL = f"{_BASE_URL}/scanner/funds/products"
+
+
+def _resolve_instrument_product_types(
+    product_type: list[str] | None,
+    product_country: list[str] | None,
+) -> list[str]:
+    if not product_type and not product_country:
+        return list(product_id2name)
+    return [] if product_type is None else product_type
 
 
 @dataclass(frozen=True)
@@ -223,14 +233,14 @@ def get_instrument_summary(
 ) -> list[InstrumentSummaryItem]:
     """Return the instrument counts by IB product type."""
     _validate_timeout(timeout)
+    product_types = _resolve_instrument_product_types(
+        product_type,
+        product_country,
+    )
     payload = InstrumentSummaryRequest(
         domain=domain,
         new_product=new_product,
-        product_type=(
-            InstrumentSummaryRequest().product_type
-            if product_type is None
-            else product_type
-        ),
+        product_type=product_types,
         product_country=[] if product_country is None else product_country,
     ).model_dump(by_alias=True)
     with _using_client(client) as active_client:
@@ -255,14 +265,14 @@ async def get_instrument_summary_async(
 ) -> list[InstrumentSummaryItem]:
     """Asynchronously return instrument counts by IB product type."""
     _validate_timeout(timeout)
+    product_types = _resolve_instrument_product_types(
+        product_type,
+        product_country,
+    )
     payload = InstrumentSummaryRequest(
         domain=domain,
         new_product=new_product,
-        product_type=(
-            InstrumentSummaryRequest().product_type
-            if product_type is None
-            else product_type
-        ),
+        product_type=product_types,
         product_country=[] if product_country is None else product_country,
     ).model_dump(by_alias=True)
     async with _using_async_client(client) as active_client:

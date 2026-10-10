@@ -6,6 +6,23 @@ type NewProduct = Literal["all", "T", "F"]
 type InstrumentSortField = Literal["currency", "country", "symbol", "exchange_id"]
 type SortDirection = Literal["asc", "desc"]
 
+product_id2name = {
+    "OPT": "Options",
+    "FUND": "Mutual Funds",
+    "FUT": "Futures",
+    "STK": "Stocks",
+    "BOND": "Bonds",
+    "CMDTY": "Metals",
+    "IND": "Indices",
+    "WAR": "Warrants",
+    "IOPT": "Structured Products",
+    "CASH": "Currencies",
+    "FOP": "Options on Futures",
+    "CFD": "CFDs",
+}
+
+product_name2id = {v: k for k, v in product_id2name.items()}
+
 
 class IBRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -36,44 +53,9 @@ class InstrumentSummaryRequest(IBRequest):
         alias="pageSize",
     )
     product_type: list[str] = Field(
-        min_length=1,
-        default_factory=lambda: [
-            "CMDTY",
-            "FOP",
-            "IOPT",
-            "IND",
-            "FUND",
-            "FUT",
-            "CASH",
-            "OPT",
-            "ETF",
-            "WAR",
-            "BOND",
-            "STK",
-            # "FC",
-            # "CRYPTO",
-        ],
+        default_factory=lambda: list(product_id2name),
         alias="productType",
     )
-
-
-product_id2name = {
-    # "CFD",
-    "OPT": "Options",
-    "FUND": "Mutual Funds",
-    "FUT": "Futures",
-    "STK": "Stocks",
-    "BOND": "Bonds",
-    "CMDTY": "Metals",
-    "IND": "Indices",
-    "WAR": "Warrants",
-    "IOPT": "Structured Products",
-    "CASH": "Currencies",
-    "FOP": "Options on Futures",
-    # "Cryptocurrency":"CRYPTO",
-}
-
-product_name2id = {v: k for k, v in product_id2name.items()}
 
 
 class ProductsByFiltersRequest(IBRequest):

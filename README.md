@@ -156,9 +156,12 @@ asyncio.run(main())
 ```
 
 `product_type` and `product_country` accept lists of IB product types and
-countries. `new_product` accepts `"all"` (default), `"T"`, or `"F"` to select
-all, new, or non-new products. These filters are sent to both the summary used
-to determine pages and the products requests. Requests use the live IB API and
+countries. If both lists are empty, the scraper uses all keys from
+`product_id2name` (including `CFD`) as product types; otherwise, the provided
+filters are passed through. `new_product` accepts `"all"` (default), `"T"`, or
+`"F"` to select all, new, or non-new products. These filters are sent to both
+the summary used to determine pages and the products requests. Requests use
+the live IB API and
 are not cached or persisted. Product page sizes must be 100, 200, 300, 400, or
 500. Both instrument scrape iterators yield an `InstrumentScrapeSummary`
 tagged event first (`event == "summary"`, with `products` containing

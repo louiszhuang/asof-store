@@ -37,6 +37,7 @@ from asof_store.ib_models import (
     InstrumentSummaryRequest,
     ProductsByFiltersRequest,
     ProductsResponse,
+    product_id2name,
 )
 
 
@@ -253,20 +254,7 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
     summary_payload = client.requests[0][2]["payload"]
     assert summary_payload["pageSize"] == 100
     assert summary_payload["newProduct"] == "T"
-    assert summary_payload["productType"] == [
-        "CMDTY",
-        "FOP",
-        "IOPT",
-        "IND",
-        "FUND",
-        "FUT",
-        "CASH",
-        "OPT",
-        "ETF",
-        "WAR",
-        "BOND",
-        "STK",
-    ]
+    assert summary_payload["productType"] == list(product_id2name)
     assert client.requests[1][1] == _PRODUCTS_URL
     assert client.requests[1][2]["payload"] == {
         "domain": "uk",
@@ -877,20 +865,71 @@ def test_instrument_summary_model_rejects_invalid_counts(
 def test_instrument_summary_request_contains_supported_product_types() -> None:
     request = InstrumentSummaryRequest()
 
-    assert request.model_dump(by_alias=True)["productType"] == [
-        "CMDTY",
-        "FOP",
-        "IOPT",
-        "IND",
-        "FUND",
-        "FUT",
-        "CASH",
-        "OPT",
-        "ETF",
-        "WAR",
-        "BOND",
-        "STK",
-    ]
+    assert request.model_dump(by_alias=True)["productType"] == list(product_id2name)
+    assert "CFD" in product_id2name
+
+
+def test_instrument_summary_defaults_to_mapped_types_when_both_filters_are_empty() -> None:
+    client = FakeClient(
+        lambda method, url, payload: FakeResponse(
+            [{"productType": "STK", "totalCount": 1}]
+        )
+    )
+
+    result = get_instrument_summary(client)
+
+    assert result[0].product_type == "STK"
+    assert client.requests[0][2]["payload"]["productType"] == list(product_id2name)
+
+    get_instrument_summary(client, product_type=[], product_country=[])
+    assert client.requests[1][2]["payload"]["productType"] == list(product_id2name)
+
+    get_instrument_summary(client, product_type=None, product_country=["US"])
+    assert client.requests[2][2]["payload"]["productType"] == []
+    assert client.requests[2][2]["payload"]["productCountry"] == ["US"]
+
+    get_instrument_summary(client, product_type=["STK"], product_country=[])
+    assert client.requests[3][2]["payload"]["productType"] == ["STK"]
+    assert client.requests[3][2]["payload"]["productCountry"] == []
+
+
+def test_instrument_summary_async_defaults_to_mapped_types_when_both_filters_are_empty() -> None:
+    async def exercise() -> None:
+        client = AsyncFakeClient(
+            lambda method, url, payload: FakeResponse(
+                [{"productType": "STK", "totalCount": 1}]
+            )
+        )
+
+        result = await get_instrument_summary_async(client)
+
+        assert result[0].product_type == "STK"
+        assert client.requests[0][2]["payload"]["productType"] == list(product_id2name)
+
+        await get_instrument_summary_async(
+            client,
+            product_type=[],
+            product_country=[],
+        )
+        assert client.requests[1][2]["payload"]["productType"] == list(product_id2name)
+
+        await get_instrument_summary_async(
+            client,
+            product_type=None,
+            product_country=["US"],
+        )
+        assert client.requests[2][2]["payload"]["productType"] == []
+        assert client.requests[2][2]["payload"]["productCountry"] == ["US"]
+
+        await get_instrument_summary_async(
+            client,
+            product_type=["STK"],
+            product_country=[],
+        )
+        assert client.requests[3][2]["payload"]["productType"] == ["STK"]
+        assert client.requests[3][2]["payload"]["productCountry"] == []
+
+    asyncio.run(exercise())
 
 
 def test_instrument_model_preserves_unmodeled_ib_fields() -> None:
