@@ -80,6 +80,9 @@ arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
 supported because PostgreSQL does not provide ordering comparisons for them.
 SQL tables use `(key, timestamp)` as a composite primary key, which also
 provides the index used for efficient latest-version lookups.
+PostgreSQL SQL stores with JSON-compatible values provide
+`store.get_unique_set(field)`, returning distinct field values across each
+key's latest version. Missing or JSON null fields appear as `None` in the set.
 
 ## Interactive Brokers data (optional)
 

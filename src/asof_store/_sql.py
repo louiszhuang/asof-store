@@ -22,7 +22,7 @@ from sqlalchemy import (
     create_engine,
     select,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, distinct_on
 from sqlalchemy.sql.type_api import TypeEngine
 
 from ._abc import AsOfStoreABC
@@ -61,9 +61,13 @@ def _sql_type(python_type: type[Any]) -> TypeEngine[Any]:
         return Numeric()
     if python_type is UUID:
         return Uuid(as_uuid=True)
-    if python_type in (dict, list, tuple) or _is_pydantic_model(python_type):
+    if _uses_json(python_type):
         return JSON().with_variant(JSONB, "postgresql")
     return LargeBinary()
+
+
+def _uses_json(python_type: type[Any]) -> bool:
+    return python_type in (dict, list, tuple) or _is_pydantic_model(python_type)
 
 
 def _is_pydantic_model(python_type: type[Any]) -> bool:
@@ -260,3 +264,28 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         if self._value_type is type(None):
             return None
         return _decode(self._value_type, value)
+
+    def get_unique_set(self, field: str) -> set[str | None]:
+        """Return distinct JSON field values from each key's latest row."""
+        if not isinstance(field, str) or not field:
+            raise ValueError("field must be a non-empty string")
+        if self._engine.dialect.name != "postgresql":
+            raise NotImplementedError(
+                "get_unique_set is currently supported only for PostgreSQL"
+            )
+        if not _uses_json(self._value_type):
+            raise TypeError("get_unique_set requires a JSON-compatible value_type")
+
+        latest_per_key = (
+            select(self._versions.c.key, self._versions.c.value)
+            .ext(distinct_on(self._versions.c.key))
+            .order_by(
+                self._versions.c.key,
+                self._versions.c.timestamp.desc(),
+            )
+            .subquery()
+        )
+        field_value = latest_per_key.c.value.op("->>")(field)
+        statement = select(field_value).distinct()
+        with self._engine.connect() as connection:
+            return set(connection.scalars(statement))

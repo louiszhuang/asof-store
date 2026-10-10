@@ -52,7 +52,7 @@ def _assert_datetime_timestamp_behavior(store) -> None:
     with store.as_of(datetime(2024, 1, 1, 8, 30, tzinfo=UTC)) as snapshot:
         assert snapshot.get("event") == "original"
     with pytest.raises(ValueError, match="timezone-aware"):
-        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")  # noqa: DTZ001
+        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")
 
 
 def _assert_timestamp_type_ordering(store, earlier, later) -> None:
@@ -112,6 +112,22 @@ def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
         store.close()
 
 
+def test_postgresql_get_unique_set_uses_latest_value_per_key() -> None:
+    table_name = f"asof_unique_{uuid4().hex}"
+    store = AsOfStore.from_sql(_POSTGRES_URI, table_name, int, str, dict)
+    try:
+        assert store.put(1, "a", {"country": "CA"}) is True
+        assert store.put(2, "a", {"country": "US"}) is True
+        assert store.put(1, "b", {"country": "FR"}) is True
+        assert store.put(1, "c", {"country": None}) is True
+        assert store.put(1, "d", {"region": "GB"}) is True
+
+        assert store.get_unique_set("country") == {"FR", "US", None}
+    finally:
+        store._versions.drop(store._engine, checkfirst=True)
+        store.close()
+
+
 def test_postgresql_tuples_round_trip_as_jsonb_arrays() -> None:
     table_name = f"asof_tuple_{uuid4().hex}"
     store = AsOfStore.from_sql(_POSTGRES_URI, table_name, int, tuple, tuple)
@@ -145,13 +161,14 @@ def test_postgresql_none_type_store_omits_value_column() -> None:
         assert store.put(1, "item", None) is True
         assert store.put(1, "item", None) is False
         assert store.put(2, "item", None) is False
-        with pytest.raises(ValueError, match="must be greater than the latest timestamp"):
+        with pytest.raises(
+            ValueError, match="must be greater than the latest timestamp"
+        ):
             store.put(0, "item", None)
         assert store.get(2, "item") is None
 
         assert {
-            column["name"]
-            for column in inspect(store._engine).get_columns(table_name)
+            column["name"] for column in inspect(store._engine).get_columns(table_name)
         } == {"key", "timestamp"}
     finally:
         store._versions.drop(store._engine, checkfirst=True)

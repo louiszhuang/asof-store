@@ -164,7 +164,9 @@ def test_sqlite_store_supports_none_type_values() -> None:
             column["name"]
             for column in inspect(store._engine).get_columns("none_versions")
         } == {"key", "timestamp"}
-        with pytest.raises(ValueError, match="must be greater than the latest timestamp"):
+        with pytest.raises(
+            ValueError, match="must be greater than the latest timestamp"
+        ):
             store.put(9, "item", None)
     finally:
         store.close()
@@ -191,7 +193,7 @@ def _assert_datetime_timestamp_behavior(store: AsOfStoreABC) -> None:
         assert snapshot.get("event") == "original"
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")  # noqa: DTZ001
+        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")
 
 
 def test_sqlite_datetime_timestamp_type() -> None:
@@ -278,6 +280,17 @@ def test_sqlite_tuple_values_and_keys_round_trip_as_json() -> None:
         }
         assert column_types["key"] == "JSON"
         assert column_types["value"] == "JSON"
+    finally:
+        store.close()
+
+
+def test_get_unique_set_is_postgresql_only() -> None:
+    store = _from_sql("sqlite:///:memory:", "unique_values", int, str, dict)
+    try:
+        with pytest.raises(NotImplementedError, match="only for PostgreSQL"):
+            store.get_unique_set("country")
+        with pytest.raises(ValueError, match="non-empty string"):
+            store.get_unique_set("")
     finally:
         store.close()
 
