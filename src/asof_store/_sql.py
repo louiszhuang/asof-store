@@ -289,3 +289,27 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         statement = select(field_value).distinct()
         with self._engine.connect() as connection:
             return set(connection.scalars(statement))
+
+    def get_all(self) -> list[Value | None]:
+        """Return each key's latest value, ordered by key."""
+        if self._engine.dialect.name != "postgresql":
+            raise NotImplementedError(
+                "get_all is currently supported only for PostgreSQL"
+            )
+
+        value_column = (
+            self._versions.c.key
+            if self._value_type is type(None)
+            else self._versions.c.value
+        )
+        statement = (
+            select(value_column)
+            .ext(distinct_on(self._versions.c.key))
+            .order_by(self._versions.c.key, self._versions.c.timestamp.desc())
+        )
+        with self._engine.connect() as connection:
+            values = connection.scalars(statement).all()
+
+        if self._value_type is type(None):
+            return [None for _ in values]
+        return [_decode(self._value_type, value) for value in values]

@@ -83,6 +83,9 @@ provides the index used for efficient latest-version lookups.
 PostgreSQL SQL stores with JSON-compatible values provide
 `store.get_unique_set(field)`, returning distinct field values across each
 key's latest version. Missing or JSON null fields appear as `None` in the set.
+PostgreSQL SQL stores also provide `store.get_all()`, returning a list with
+the latest value for each key, ordered by key. Identical values for different
+keys remain separate entries.
 
 ## Interactive Brokers data (optional)
 
