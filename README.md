@@ -204,6 +204,9 @@ uv run ass scrape-instruments --sql-uri "sqlite:///ib-instruments.db"
 Use `--sql-uri` with `--table-name` (default `ib_instruments`) to choose the
 destination. Optional repeated `--product-type` and `--product-country`
 arguments filter the scrape; `--new-product` accepts `all`, `T`, or `F`.
+`--sort-field` selects the product-page sort field (`currency`, `country`,
+`symbol`, or `exchange_id`; default `symbol`).
+`--sort-direction` selects `asc` or `desc` (default `asc`).
 `--start-page-number` resumes pagination at a given page and requires exactly
 one `--product-type`; pages before it are not requested. `--end-page-number`
 sets an inclusive last page and also requires exactly one `--product-type`.

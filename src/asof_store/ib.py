@@ -18,11 +18,13 @@ from .ib_models import (
     FundProductsRequest,
     FundProductsResponse,
     Instrument,
+    InstrumentSortField,
     InstrumentSummaryItem,
     InstrumentSummaryRequest,
     NewProduct,
     ProductsByFiltersRequest,
     ProductsResponse,
+    SortDirection,
 )
 
 _SUMMARY_ADAPTER = TypeAdapter(list[InstrumentSummaryItem])
@@ -283,6 +285,8 @@ def get_products_by_filters(
     domain: str = "uk",
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    sort_field: InstrumentSortField = "symbol",
+    sort_direction: SortDirection = "asc",
     timeout: float = 30,
 ) -> ProductsResponse:
     """Return one page of IB products for a product type."""
@@ -300,6 +304,8 @@ def get_products_by_filters(
         page_size=page_size,
         product_type=[product_type],
         product_country=[] if product_country is None else product_country,
+        sort_field=sort_field,
+        sort_direction=sort_direction,
     ).model_dump(by_alias=True)
     with _using_client(client) as active_client:
         result = _request_json(
@@ -321,6 +327,8 @@ async def get_products_by_filters_async(
     domain: str = "uk",
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    sort_field: InstrumentSortField = "symbol",
+    sort_direction: SortDirection = "asc",
     timeout: float = 30,
 ) -> ProductsResponse:
     """Asynchronously return one page of IB products for a product type."""
@@ -338,6 +346,8 @@ async def get_products_by_filters_async(
         page_size=page_size,
         product_type=[product_type],
         product_country=[] if product_country is None else product_country,
+        sort_field=sort_field,
+        sort_direction=sort_direction,
     ).model_dump(by_alias=True)
     async with _using_async_client(client) as active_client:
         result = await _request_json_async(
@@ -360,7 +370,7 @@ def get_funds_by_filters(
     product_country: list[str] | None = None,
     product_symbol: str = "",
     sort_direction: Literal["asc", "desc"] = "asc",
-    sort_field: str = "symbol",
+    sort_field: InstrumentSortField = "symbol",
     residency: str = "",
     family: str = "",
     is_fund_renamed: str = "",
@@ -421,7 +431,7 @@ async def get_funds_by_filters_async(
     product_country: list[str] | None = None,
     product_symbol: str = "",
     sort_direction: Literal["asc", "desc"] = "asc",
-    sort_field: str = "symbol",
+    sort_field: InstrumentSortField = "symbol",
     residency: str = "",
     family: str = "",
     is_fund_renamed: str = "",
@@ -585,6 +595,8 @@ def scrape_instruments(
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    sort_field: InstrumentSortField = "symbol",
+    sort_direction: SortDirection = "asc",
     start_page_number: int = 1,
     end_page_number: int | None = None,
     timeout: float = 30,
@@ -632,6 +644,8 @@ def scrape_instruments(
                     domain=domain,
                     product_country=product_country,
                     new_product=new_product,
+                    sort_field=sort_field,
+                    sort_direction=sort_direction,
                     timeout=timeout,
                 )
                 expected_count = min(
@@ -660,6 +674,8 @@ async def scrape_instruments_async(
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    sort_field: InstrumentSortField = "symbol",
+    sort_direction: SortDirection = "asc",
     start_page_number: int = 1,
     end_page_number: int | None = None,
     timeout: float = 30,
@@ -707,6 +723,8 @@ async def scrape_instruments_async(
                     domain=domain,
                     product_country=product_country,
                     new_product=new_product,
+                    sort_field=sort_field,
+                    sort_direction=sort_direction,
                     timeout=timeout,
                 )
                 expected_count = min(

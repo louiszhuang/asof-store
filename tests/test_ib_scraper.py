@@ -307,6 +307,10 @@ def test_cli_wires_filters_progress_and_closes_store(
             "US",
             "--new-product",
             "T",
+            "--sort-field",
+            "currency",
+            "--sort-direction",
+            "desc",
             "--print-new",
             "--print-changes",
             "--progress-every",
@@ -331,6 +335,8 @@ def test_cli_wires_filters_progress_and_closes_store(
     assert captured["end_page_number"] == 7
     assert captured["product_country"] == ["US"]
     assert captured["new_product"] == "T"
+    assert captured["sort_field"] == "currency"
+    assert captured["sort_direction"] == "desc"
     assert captured["print_new"] is True
     assert captured["print_changes"] is True
     assert store.closed is True

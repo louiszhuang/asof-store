@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 type NewProduct = Literal["all", "T", "F"]
+type InstrumentSortField = Literal["currency", "country", "symbol", "exchange_id"]
+type SortDirection = Literal["asc", "desc"]
 
 
 class IBRequest(BaseModel):
@@ -21,11 +23,8 @@ class IBRequest(BaseModel):
     product_country: list[str] = Field(default_factory=list, alias="productCountry")
     product_symbol: str = Field(default="", alias="productSymbol")
     product_type: list[str] = Field(default_factory=list, alias="productType")
-    sort_direction: Literal["asc", "desc"] = Field(
-        default="asc",
-        alias="sortDirection",
-    )
-    sort_field: str = Field(default="symbol", alias="sortField")
+    sort_direction: SortDirection = Field(default="asc", alias="sortDirection")
+    sort_field: InstrumentSortField = Field(default="symbol", alias="sortField")
 
 
 class InstrumentSummaryRequest(IBRequest):
@@ -161,7 +160,9 @@ class ProductsResponse(BaseModel):
 
 
 class FundProductsRequest(IBRequest):
-    product_type: list[str] = Field(default_factory=lambda: ["FUND"], alias="productType")
+    product_type: list[str] = Field(
+        default_factory=lambda: ["FUND"], alias="productType"
+    )
     residency: str = ""
     family: str = ""
     is_fund_renamed: str = Field(default="", alias="isFundRenamed")

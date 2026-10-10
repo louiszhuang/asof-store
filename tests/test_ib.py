@@ -203,6 +203,7 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
             page_size=500,
             product_country=["US", "CA"],
             new_product="F",
+            sort_field="currency",
         )
         assert isinstance(exchange_result, ExchangeResponse)
         assert isinstance(summary_result[0], InstrumentSummaryItem)
@@ -219,6 +220,7 @@ def test_async_endpoint_wrappers_call_ib_endpoints_directly() -> None:
         assert client.requests[1][2]["payload"]["newProduct"] == "all"
         assert client.requests[2][2]["payload"]["productCountry"] == ["US", "CA"]
         assert client.requests[2][2]["payload"]["newProduct"] == "F"
+        assert client.requests[2][2]["payload"]["sortField"] == "currency"
 
     asyncio.run(exercise())
 
@@ -241,6 +243,8 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         domain="uk",
         product_country=["US", "CA"],
         new_product="F",
+        sort_field="country",
+        sort_direction="desc",
     )
     assert summary_result == [InstrumentSummaryItem.model_validate(summary[0])]
     assert isinstance(product_result, ProductsResponse)
@@ -272,9 +276,19 @@ def test_instrument_endpoint_wrappers_send_expected_bodies() -> None:
         "productCountry": ["US", "CA"],
         "productSymbol": "",
         "productType": ["STK"],
-        "sortDirection": "asc",
-        "sortField": "symbol",
+        "sortDirection": "desc",
+        "sortField": "country",
     }
+
+
+def test_products_request_applies_sort_direction() -> None:
+    client = FakeClient(
+        lambda method, url, payload: FakeResponse({"products": [{"symbol": "ABC"}]})
+    )
+
+    get_products_by_filters("STK", client, sort_direction="desc")
+
+    assert client.requests[0][2]["payload"]["sortDirection"] == "desc"
 
 
 def test_fund_request_model_serializes_ib_api_names() -> None:
@@ -419,6 +433,8 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         product_type = payload["productType"][0]
         page_number = payload["pageNumber"]
         assert payload["newProduct"] == "T"
+        assert payload["sortField"] == "exchange_id"
+        assert payload["sortDirection"] == "desc"
         total_count = next(
             item["totalCount"]
             for item in summary
@@ -443,6 +459,8 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
             product_type=["STK"],
             product_country=["US", "CA"],
             new_product="T",
+            sort_field="exchange_id",
+            sort_direction="desc",
         )
     )
 
@@ -473,6 +491,14 @@ def test_scrape_instruments_fetches_each_page_for_each_type() -> None:
         request[2]["payload"]["newProduct"] == "T"
         for request in client.requests
         if request[1] in (_SUMMARY_URL, _PRODUCTS_URL)
+    )
+    assert all(
+        request[2]["payload"]["sortField"] == "exchange_id"
+        for request in client.requests[1:]
+    )
+    assert all(
+        request[2]["payload"]["sortDirection"] == "desc"
+        for request in client.requests[1:]
     )
 
 

@@ -20,7 +20,14 @@ from .ib import (
     scrape_instruments,
     scrape_instruments_async,
 )
-from .ib_models import Exchange, Fund, Instrument, NewProduct
+from .ib_models import (
+    Exchange,
+    Fund,
+    Instrument,
+    InstrumentSortField,
+    NewProduct,
+    SortDirection,
+)
 
 type InstrumentStore = AsOfStoreABC[datetime, int, Instrument]
 type MissingPrimaryKeyStore = AsOfStoreABC[datetime, Instrument, NoneType]
@@ -260,6 +267,8 @@ def scrape_and_store_instruments(
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    sort_field: InstrumentSortField = "symbol",
+    sort_direction: SortDirection = "asc",
     start_page_number: int = 1,
     end_page_number: int | None = None,
     timeout: float = 30,
@@ -280,6 +289,8 @@ def scrape_and_store_instruments(
         product_type=product_type,
         product_country=product_country,
         new_product=new_product,
+        sort_field=sort_field,
+        sort_direction=sort_direction,
         start_page_number=start_page_number,
         end_page_number=end_page_number,
         timeout=timeout,
@@ -323,6 +334,8 @@ async def async_scrape_and_store_instruments(
     product_type: list[str] | None = None,
     product_country: list[str] | None = None,
     new_product: NewProduct = "all",
+    sort_field: InstrumentSortField = "symbol",
+    sort_direction: SortDirection = "asc",
     start_page_number: int = 1,
     end_page_number: int | None = None,
     timeout: float = 30,
@@ -346,6 +359,8 @@ async def async_scrape_and_store_instruments(
             product_type=product_type,
             product_country=product_country,
             new_product=new_product,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
             start_page_number=start_page_number,
             end_page_number=end_page_number,
             timeout=timeout,
@@ -602,6 +617,16 @@ def _build_parser() -> argparse.ArgumentParser:
     instruments_parser.add_argument("--product-type", action="append")
     instruments_parser.add_argument("--product-country", action="append")
     instruments_parser.add_argument(
+        "--sort-field",
+        choices=("currency", "country", "symbol", "exchange_id"),
+        default="symbol",
+    )
+    instruments_parser.add_argument(
+        "--sort-direction",
+        choices=("asc", "desc"),
+        default="asc",
+    )
+    instruments_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="report the filtered instrument summary without scraping or storing",
@@ -798,6 +823,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 product_type=args.product_type,
                 product_country=args.product_country,
                 new_product=args.new_product,
+                sort_field=args.sort_field,
+                sort_direction=args.sort_direction,
                 start_page_number=(
                     1 if args.start_page_number is None else args.start_page_number
                 ),
