@@ -291,8 +291,19 @@ def test_get_unique_set_is_postgresql_only() -> None:
             store.get_unique_set("country")
         with pytest.raises(ValueError, match="non-empty string"):
             store.get_unique_set("")
+    finally:
+        store.close()
+
+
+def test_get_all_and_get_unique_set_are_postgresql_only() -> None:
+    store = _from_sql("sqlite:///:memory:", "query_versions", int, str, dict)
+    try:
         with pytest.raises(NotImplementedError, match="only for PostgreSQL"):
             store.get_all()
+        with pytest.raises(NotImplementedError, match="only for PostgreSQL"):
+            store.get_unique_set("country")
+        with pytest.raises(ValueError, match="non-empty string"):
+            store.get_unique_set("")
     finally:
         store.close()
 

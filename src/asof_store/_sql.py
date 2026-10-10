@@ -23,6 +23,8 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB, distinct_on
+from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.type_api import TypeEngine
 
 from ._abc import AsOfStoreABC
@@ -265,6 +267,13 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             return None
         return _decode(self._value_type, value)
 
+    def _latest_per_key(self, value_column: ColumnElement[Any]) -> Select[Any]:
+        return (
+            select(value_column)
+            .ext(distinct_on(self._versions.c.key))
+            .order_by(self._versions.c.key, self._versions.c.timestamp.desc())
+        )
+
     def get_unique_set(self, field: str) -> set[str | None]:
         """Return distinct JSON field values from each key's latest row."""
         if not isinstance(field, str) or not field:
@@ -276,15 +285,7 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         if not _uses_json(self._value_type):
             raise TypeError("get_unique_set requires a JSON-compatible value_type")
 
-        latest_per_key = (
-            select(self._versions.c.key, self._versions.c.value)
-            .ext(distinct_on(self._versions.c.key))
-            .order_by(
-                self._versions.c.key,
-                self._versions.c.timestamp.desc(),
-            )
-            .subquery()
-        )
+        latest_per_key = self._latest_per_key(self._versions.c.value).subquery()
         field_value = latest_per_key.c.value.op("->>")(field)
         statement = select(field_value).distinct()
         with self._engine.connect() as connection:
@@ -298,15 +299,11 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             )
 
         value_column = (
-            self._versions.c.key
+            self._versions.c.timestamp
             if self._value_type is type(None)
             else self._versions.c.value
         )
-        statement = (
-            select(value_column)
-            .ext(distinct_on(self._versions.c.key))
-            .order_by(self._versions.c.key, self._versions.c.timestamp.desc())
-        )
+        statement = self._latest_per_key(value_column)
         with self._engine.connect() as connection:
             values = connection.scalars(statement).all()
 
