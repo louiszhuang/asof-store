@@ -374,6 +374,56 @@ def test_cli_uses_default_instrument_template_table(
     )
 
 
+def test_instrument_cli_dry_run_reports_summary_without_store(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_summary(**kwargs: Any) -> list[InstrumentSummaryItem]:
+        captured.update(kwargs)
+        return [
+            InstrumentSummaryItem(productType="STK", totalCount=123),
+            InstrumentSummaryItem(productType="BOND", totalCount=7),
+        ]
+
+    monkeypatch.setattr(ib_scraper, "get_instrument_summary", fake_summary)
+    monkeypatch.setattr(
+        AsOfStore,
+        "from_sql",
+        classmethod(lambda cls, *args: pytest.fail("dry-run opened a store")),
+    )
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_and_store_instruments",
+        lambda *args, **kwargs: pytest.fail("dry-run scraped product pages"),
+    )
+
+    result = ib_scraper.main(
+        [
+            "scrape-instruments",
+            "--dry-run",
+            "--product-type",
+            "STK",
+            "--product-country",
+            "US",
+            "--new-product",
+            "T",
+        ]
+    )
+
+    assert result == 0
+    assert captured == {
+        "domain": "uk",
+        "product_type": ["STK"],
+        "product_country": ["US"],
+        "new_product": "T",
+        "timeout": 30,
+    }
+    stderr = capsys.readouterr().err
+    assert stderr.strip() == "Instrument summary: STK=123, BOND=7"
+
+
 def test_cli_rejects_nonpositive_progress_interval() -> None:
     with pytest.raises(ValueError, match="--progress-every"):
         ib_scraper.main(

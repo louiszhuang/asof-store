@@ -12,6 +12,7 @@ from ._store import AsOfStore
 from .ib import (
     InstrumentScrapePage,
     InstrumentScrapeSummary,
+    get_instrument_summary,
     scrape_exchanges,
     scrape_exchanges_async,
     scrape_funds,
@@ -574,7 +575,7 @@ def _build_parser() -> argparse.ArgumentParser:
         (exchanges_parser, "ib_exchanges"),
         (funds_parser, "ib_funds"),
     ):
-        subparser.add_argument("--sql-uri", required=True)
+        subparser.add_argument("--sql-uri")
         subparser.add_argument("--table-name", default=default_table)
         subparser.add_argument("--timeout", type=float, default=30)
         subparser.add_argument("--print-new", action="store_true")
@@ -600,6 +601,11 @@ def _build_parser() -> argparse.ArgumentParser:
     instruments_parser.add_argument("--page-size", type=int, default=500)
     instruments_parser.add_argument("--product-type", action="append")
     instruments_parser.add_argument("--product-country", action="append")
+    instruments_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report the filtered instrument summary without scraping or storing",
+    )
     instruments_parser.add_argument(
         "--start-page-number",
         type=int,
@@ -663,6 +669,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.progress_every < 1:
         raise ValueError("--progress-every must be at least 1")
+    if args.command == "scrape-instruments" and args.dry_run:
+        summary = get_instrument_summary(
+            domain=args.domain,
+            product_type=args.product_type,
+            product_country=args.product_country,
+            new_product=args.new_product,
+            timeout=args.timeout,
+        )
+        _print_instrument_summary(InstrumentScrapeSummary(tuple(summary)), sys.stderr)
+        return 0
+    if args.sql_uri is None:
+        raise ValueError("--sql-uri is required unless --dry-run is used")
+
     if args.command == "scrape-instruments":
         if args.table_name == args.missing_primary_key_table_name:
             raise ValueError(

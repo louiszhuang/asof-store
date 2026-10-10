@@ -218,6 +218,9 @@ primary keys. Instruments without an IB `conid` are stored in a second
 table, `ib_instrument_templates` by default, keyed by the complete
 `Instrument` model; choose another table with
 `--missing-primary-key-table-name`.
+Use `--dry-run` to request and report only the filtered instrument summary;
+this mode does not require `--sql-uri`, fetch product pages, or write to a
+store.
 
 ### Scraping funds into an as-of store
 
