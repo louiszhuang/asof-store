@@ -80,9 +80,11 @@ arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
 supported because PostgreSQL does not provide ordering comparisons for them.
 SQL tables use `(key, timestamp)` as a composite primary key, which also
 provides the index used for efficient latest-version lookups.
-PostgreSQL SQL stores provide `get_all()` to return each key's latest value,
-and `get_unique_set(field)` to return distinct values of a JSON field from
-those latest values. Missing or JSON null fields appear as `None` in the set.
+PostgreSQL SQL stores provide `get_all(as_of=None)` to return each key's latest
+value, and `get_unique_set(field, as_of=None)` to return distinct values of a
+JSON field from those latest values. Supplying `as_of` limits each query to
+versions at or before that timestamp. Missing or JSON null fields appear as
+`None` in the set.
 
 ## Interactive Brokers data (optional)
 

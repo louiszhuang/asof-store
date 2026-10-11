@@ -137,11 +137,19 @@ def test_postgresql_get_all_returns_latest_value_for_each_key() -> None:
         assert store.put(1, "b", {"country": "US"}) is True
         assert store.put(1, "c", {"country": None}) is True
 
+        assert store.get_all(1) == [
+            {"country": "CA"},
+            {"country": "US"},
+            {"country": None},
+        ]
+        assert store.get_all(0) == []
         assert store.get_all() == [
             {"country": "US"},
             {"country": "US"},
             {"country": None},
         ]
+        assert store.get_unique_set("country", 1) == {"CA", "US", None}
+        assert store.get_unique_set("country", 0) == set()
     finally:
         store._versions.drop(store._engine, checkfirst=True)
         store.close()
@@ -186,6 +194,7 @@ def test_postgresql_none_type_store_omits_value_column() -> None:
             store.put(0, "item", None)
         assert store.get(2, "item") is None
         assert store.get_all() == [None]
+        assert store.get_all(0) == []
 
         assert {
             column["name"] for column in inspect(store._engine).get_columns(table_name)

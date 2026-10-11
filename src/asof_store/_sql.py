@@ -267,15 +267,25 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             return None
         return _decode(self._value_type, value)
 
-    def _latest_per_key(self, value_column: ColumnElement[Any]) -> Select[Any]:
+    def _latest_per_key(
+        self,
+        value_column: ColumnElement[Any],
+        as_of: Timestamp | None = None,
+    ) -> Select[Any]:
+        statement = select(value_column)
+        if as_of is not None:
+            statement = statement.where(
+                self._versions.c.timestamp <= _encode(self._timestamp_type, as_of)
+            )
         return (
-            select(value_column)
-            .ext(distinct_on(self._versions.c.key))
+            statement.ext(distinct_on(self._versions.c.key))
             .order_by(self._versions.c.key, self._versions.c.timestamp.desc())
         )
 
-    def get_unique_set(self, field: str) -> set[str | None]:
-        """Return distinct JSON field values from each key's latest row."""
+    def get_unique_set(
+        self, field: str, as_of: Timestamp | None = None
+    ) -> set[str | None]:
+        """Return distinct JSON field values from each key's latest row at as_of."""
         if not isinstance(field, str) or not field:
             raise ValueError("field must be a non-empty string")
         if self._engine.dialect.name != "postgresql":
@@ -285,14 +295,16 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         if not _uses_json(self._value_type):
             raise TypeError("get_unique_set requires a JSON-compatible value_type")
 
-        latest_per_key = self._latest_per_key(self._versions.c.value).subquery()
+        latest_per_key = self._latest_per_key(
+            self._versions.c.value, as_of
+        ).subquery()
         field_value = latest_per_key.c.value.op("->>")(field)
         statement = select(field_value).distinct()
         with self._engine.connect() as connection:
             return set(connection.scalars(statement))
 
-    def get_all(self) -> list[Value | None]:
-        """Return each key's latest value, ordered by key."""
+    def get_all(self, as_of: Timestamp | None = None) -> list[Value | None]:
+        """Return each key's latest value at as_of, ordered by key."""
         if self._engine.dialect.name != "postgresql":
             raise NotImplementedError(
                 "get_all is currently supported only for PostgreSQL"
@@ -303,7 +315,7 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             if self._value_type is type(None)
             else self._versions.c.value
         )
-        statement = self._latest_per_key(value_column)
+        statement = self._latest_per_key(value_column, as_of)
         with self._engine.connect() as connection:
             values = connection.scalars(statement).all()
 
