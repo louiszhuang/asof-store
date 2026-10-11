@@ -41,6 +41,9 @@ def test_get_returns_latest_value_at_or_before_timestamp() -> None:
     assert store.get(10, "item") == "earlier"
     assert store.get(25, "item") == "later"
     assert store.get(30, "item") == "latest"
+    assert store.get(None, "item") == "latest"
+    with store.as_of(None) as snapshot:
+        assert snapshot.get("item") == "latest"
 
 
 def test_put_requires_timestamp_greater_than_latest() -> None:
@@ -135,7 +138,10 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
 
         assert store.get(15, "item") == {"value": "earlier"}
         assert store.get(9, "item") is None
+        assert store.get(None, "item") == {"value": "later"}
         with store.as_of(25) as snapshot:
+            assert snapshot.get("item") == {"value": "later"}
+        with store.as_of(None) as snapshot:
             assert snapshot.get("item") == {"value": "later"}
         assert store.get(40, "json") == {"nested": [1, True, None]}
         assert text_store.put(30, "native", "text value") is True

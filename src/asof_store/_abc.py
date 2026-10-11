@@ -16,7 +16,7 @@ class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get(self, as_of: Timestamp, key: Key) -> Value | None:
+    def get(self, as_of: Timestamp | None, key: Key) -> Value | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -24,5 +24,5 @@ class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
         """Release resources held by the backend."""
         raise NotImplementedError
 
-    def as_of(self, as_of: Timestamp) -> AsOfView[Timestamp, Key, Value]:
+    def as_of(self, as_of: Timestamp | None) -> AsOfView[Timestamp, Key, Value]:
         return AsOfView(self, as_of)

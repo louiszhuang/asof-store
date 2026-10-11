@@ -46,13 +46,17 @@ class MemoryBackend[Timestamp: SupportsAllComparisons, Key, Value](
         values.append(value)
         return True
 
-    def get(self, as_of: Timestamp, key: Key) -> Value | None:
+    def get(self, as_of: Timestamp | None, key: Key) -> Value | None:
         versions = self._versions.get(key)
         if versions is None:
             return None
 
         timestamps, values = versions
-        index = bisect_right(timestamps, as_of) - 1
+        index = (
+            len(timestamps) - 1
+            if as_of is None
+            else bisect_right(timestamps, as_of) - 1
+        )
         if index < 0 or values is None:
             return None
         return values[index]

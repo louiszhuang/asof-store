@@ -245,9 +245,12 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
             connection.execute(self._versions.insert().values(**insert_values))
             return True
 
-    def get(self, as_of: Timestamp, key: Key) -> Value | None:
-        timestamp = _encode(self._timestamp_type, as_of)
+    def get(self, as_of: Timestamp | None, key: Key) -> Value | None:
         encoded_key = _encode(self._key_type, key)
+        conditions = [self._versions.c.key == encoded_key]
+        if as_of is not None:
+            timestamp = _encode(self._timestamp_type, as_of)
+            conditions.append(self._versions.c.timestamp <= timestamp)
         result_column = (
             self._versions.c.timestamp
             if self._value_type is type(None)
@@ -256,10 +259,7 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         with self._engine.connect() as connection:
             value = connection.scalar(
                 select(result_column)
-                .where(
-                    self._versions.c.key == encoded_key,
-                    self._versions.c.timestamp <= timestamp,
-                )
+                .where(*conditions)
                 .order_by(self._versions.c.timestamp.desc())
                 .limit(1)
             )

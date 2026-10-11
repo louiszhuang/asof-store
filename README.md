@@ -31,6 +31,8 @@ value equals that key's latest value, or when the exact latest
 `(timestamp, key, value)` is repeated. Otherwise, it records the value and
 returns `True`. Reusing a timestamp with a different value or going back to an
 earlier timestamp raises `ValueError`.
+Passing `None` as `as_of` to `get` or `store.as_of(None)` selects the latest
+available value, matching `get_all(None)` and `get_unique_set(field, None)`.
 
 ## SQL storage (optional)
 

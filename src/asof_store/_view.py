@@ -15,7 +15,7 @@ class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
     def __init__(
         self,
         store: AsOfStoreABC[Timestamp, Key, Value],
-        as_of: Timestamp,
+        as_of: Timestamp | None,
     ) -> None:
         self._store = store
         self._as_of = as_of
