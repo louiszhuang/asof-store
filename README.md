@@ -1,6 +1,6 @@
 # asof-store
 
-An in-memory versioned store for retrieving the latest value written at or
+A versioned store for retrieving the latest value written at or
 before a specified timestamp.
 
 ## Install
