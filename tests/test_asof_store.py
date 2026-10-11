@@ -96,6 +96,27 @@ def test_memory_store_supports_none_type_values() -> None:
     assert store.put(20, "item", None) is False
 
 
+def test_memory_store_get_all_and_unique_set_at_timestamp() -> None:
+    store = AsOfStore.from_memory()
+    store.put(1, "a", {"country": "CA"})
+    store.put(2, "a", {"country": "US"})
+    store.put(1, "b", {"country": "US"})
+    store.put(1, "c", {"region": "GB"})
+
+    assert store.get_all(1) == [
+        {"country": "CA"},
+        {"country": "US"},
+        {"region": "GB"},
+    ]
+    assert store.get_all() == [
+        {"country": "US"},
+        {"country": "US"},
+        {"region": "GB"},
+    ]
+    assert store.get_unique_set("country", 1) == {"CA", "US", None}
+    assert store.get_unique_set("country") == {"US", None}
+
+
 def test_memory_store_expands_history_after_none_values() -> None:
     store = AsOfStore.from_memory()
     assert store.put(10, "item", None) is True
@@ -290,24 +311,28 @@ def test_sqlite_tuple_values_and_keys_round_trip_as_json() -> None:
         store.close()
 
 
-def test_get_unique_set_is_postgresql_only() -> None:
-    store = _from_sql("sqlite:///:memory:", "unique_values", int, str, dict)
-    try:
-        with pytest.raises(NotImplementedError, match="only for PostgreSQL"):
-            store.get_unique_set("country")
-        with pytest.raises(ValueError, match="non-empty string"):
-            store.get_unique_set("")
-    finally:
-        store.close()
-
-
-def test_get_all_and_get_unique_set_are_postgresql_only() -> None:
+def test_sqlite_get_all_and_unique_set_at_timestamp() -> None:
     store = _from_sql("sqlite:///:memory:", "query_versions", int, str, dict)
     try:
-        with pytest.raises(NotImplementedError, match="only for PostgreSQL"):
-            store.get_all()
-        with pytest.raises(NotImplementedError, match="only for PostgreSQL"):
-            store.get_unique_set("country")
+        store.put(1, "a", {"country": "CA"})
+        store.put(2, "a", {"country": "US"})
+        store.put(1, "b", {"country": "US"})
+        store.put(1, "c", {"region": "GB"})
+
+        assert store.get_all(1) == [
+            {"country": "CA"},
+            {"country": "US"},
+            {"region": "GB"},
+        ]
+        assert store.get_all() == [
+            {"country": "US"},
+            {"country": "US"},
+            {"region": "GB"},
+        ]
+        assert store.get_unique_set("country", 1) == {"CA", "US", None}
+        assert store.get_unique_set("country") == {"US", None}
+        with pytest.raises(ValueError, match="non-empty string"):
+            store.get_unique_set("")
         with pytest.raises(ValueError, match="non-empty string"):
             store.get_unique_set("")
     finally:
