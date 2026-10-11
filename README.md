@@ -181,10 +181,10 @@ each completed page with that page's instrument ordinal range.
 
 Opt-in integration tests are kept in `tests/integration/`. The IB tests call the
 real IB UK API, including each endpoint and the synchronous and asynchronous
-scrapers. Install the Zapros and test extras, then enable those tests explicitly:
+scrapers. Install the scraper and test extras, then enable those tests explicitly:
 
 ```powershell
-uv sync --extra zapros --extra dev
+uv sync --extra scraper --extra dev
 $env:ASOF_STORE_RUN_IB_INTEGRATION = "1"
 uv run pytest -m integration tests/integration/test_ib_live.py
 ```
@@ -296,7 +296,7 @@ test suite before building and publishing the package.
 Install the development tools, tests, and optional dependencies with uv:
 
 ```sh
-uv sync --all-packages --all-extras
+uv sync --all-extras --locked
 uv run pytest
 ```
 
