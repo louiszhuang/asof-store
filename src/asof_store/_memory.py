@@ -1,7 +1,8 @@
 from bisect import bisect_right
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from ._abc import AsOfStoreABC
+from ._abc import AsOfStoreABC, _matches_fields
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
@@ -72,6 +73,24 @@ class MemoryBackend[Timestamp: SupportsAllComparisons, Key, Value](
             if index >= 0:
                 values.append(None if versions is None else versions[index])
         return values
+
+    def get_keys_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        keys: list[Key] = []
+        for key, (timestamps, _) in self._versions.items():
+            index = (
+                len(timestamps) - 1
+                if as_of is None
+                else bisect_right(timestamps, as_of) - 1
+            )
+            if index >= 0 and _matches_fields(key, filters, exact=exact):
+                keys.append(key)
+        return keys
 
     def close(self) -> None:
         return None

@@ -1,4 +1,5 @@
 import pickle
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -307,6 +308,96 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
         if self._value_type is type(None):
             return [None for _ in values]
         return [_decode(self._value_type, value) for value in values]
+
+    def get_all_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Value | None]:
+        """Filter latest JSON values in SQL before decoding them."""
+        if not (self._value_type is dict or _is_pydantic_model(self._value_type)):
+            raise TypeError(
+                "get_all_matching requires dict or Pydantic model values"
+            )
+        if not filters:
+            return self.get_all(as_of)
+
+        latest = self._latest_per_key(as_of)
+        conditions = [latest.c.row_number == 1]
+        filter_items = filters.items() if isinstance(filters, Mapping) else filters
+        for field, query in filter_items:
+            if not isinstance(field, str) or not field:
+                raise ValueError("filter field names must be non-empty strings")
+            if not isinstance(query, str):
+                raise TypeError("filter values must be strings")
+            expression = latest.c.value
+            for part in field.split("."):
+                if not part:
+                    raise ValueError(f"invalid dotted field name: {field!r}")
+                expression = expression[part]
+            text_value = func.lower(expression.as_string())
+            normalized_query = query.casefold()
+            conditions.append(
+                text_value == normalized_query
+                if exact
+                else text_value.contains(normalized_query, autoescape=True)
+            )
+
+        statement = (
+            select(latest.c.value).where(*conditions).order_by(latest.c.key)
+        )
+        with self._engine.connect() as connection:
+            values = connection.scalars(statement).all()
+        return [_decode(self._value_type, value) for value in values]
+
+    def get_keys_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        """Filter JSON keys in SQL and decode only the matching keys."""
+        if not (self._key_type is dict or _is_pydantic_model(self._key_type)):
+            raise TypeError("get_keys_matching requires dict or Pydantic model keys")
+        if not filters:
+            latest = self._latest_per_key(as_of)
+            statement = (
+                select(latest.c.key)
+                .where(latest.c.row_number == 1)
+                .order_by(latest.c.key)
+            )
+        else:
+            latest = self._latest_per_key(as_of)
+            conditions = [latest.c.row_number == 1]
+            filter_items = filters.items() if isinstance(filters, Mapping) else filters
+            for field, query in filter_items:
+                if not isinstance(field, str) or not field:
+                    raise ValueError("filter field names must be non-empty strings")
+                if not isinstance(query, str):
+                    raise TypeError("filter values must be strings")
+                expression = latest.c.key
+                for part in field.split("."):
+                    if not part:
+                        raise ValueError(f"invalid dotted field name: {field!r}")
+                    expression = expression[part]
+                text_value = func.lower(expression.as_string())
+                normalized_query = query.casefold()
+                conditions.append(
+                    text_value == normalized_query
+                    if exact
+                    else text_value.contains(normalized_query, autoescape=True)
+                )
+            statement = (
+                select(latest.c.key)
+                .where(*conditions)
+                .order_by(latest.c.key)
+            )
+        with self._engine.connect() as connection:
+            values = connection.scalars(statement).all()
+        return [_decode(self._key_type, value) for value in values]
 
     def get_unique_set(
         self, field: str, as_of: Timestamp | None = None

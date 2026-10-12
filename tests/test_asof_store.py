@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import NoneType
@@ -117,6 +118,35 @@ def test_memory_store_get_all_and_unique_set_at_timestamp() -> None:
     assert store.get_unique_set("country") == {"US", None}
 
 
+def test_memory_store_get_all_matching_uses_latest_value_and_nested_fields() -> None:
+    store = AsOfStore.from_memory()
+    store.put(1, "a", {"symbol": "OLD", "meta": {"country": "GB"}})
+    store.put(2, "a", {"symbol": "AAPL", "meta": {"country": "US"}})
+    store.put(1, "b", {"symbol": "MSFT", "meta": {"country": "US"}})
+
+    assert store.get_all_matching({"symbol": "old"}) == []
+    assert store.get_all_matching({"meta.country": "u"}) == [
+        {"symbol": "AAPL", "meta": {"country": "US"}},
+        {"symbol": "MSFT", "meta": {"country": "US"}},
+    ]
+    with store.as_of(1) as snapshot:
+        assert snapshot.get_all_matching({"symbol": "old"}, exact=True) == [
+            {"symbol": "OLD", "meta": {"country": "GB"}}
+        ]
+
+
+def test_memory_store_can_match_json_compatible_keys() -> None:
+    @dataclass(frozen=True)
+    class InstrumentKey:
+        symbol: str
+
+    store = AsOfStore.from_memory()
+    store.put(1, InstrumentKey("OLD"), None)
+    store.put(2, InstrumentKey("AAPL"), None)
+
+    assert store.get_keys_matching({"symbol": "app"}) == [InstrumentKey("AAPL")]
+
+
 def test_memory_store_expands_history_after_none_values() -> None:
     store = AsOfStore.from_memory()
     assert store.put(10, "item", None) is True
@@ -167,6 +197,21 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
         assert store.get(40, "json") == {"nested": [1, True, None]}
         assert text_store.put(30, "native", "text value") is True
         assert text_store.get(30, "native") == "text value"
+        assert store.put(40, "versioned", {"symbol": "OLD"}) is True
+        assert store.put(50, "versioned", {"symbol": "NEW"}) is True
+        assert store.put(50, "current", {"symbol": "AAPL", "meta": {"ccy": "USD"}})
+        assert store.put(60, "item", {"value": "latest", "symbol": "MSFT"})
+        assert store.get_all_matching({"symbol": "old"}, as_of=45) == [
+            {"symbol": "OLD"}
+        ]
+        assert store.get_all_matching({"symbol": "old"}, as_of=55) == []
+        assert store.get_all_matching({"meta.ccy": "usd"}, as_of=55) == [
+            {"symbol": "AAPL", "meta": {"ccy": "USD"}}
+        ]
+        with store.as_of(55) as snapshot:
+            assert snapshot.get_all_matching({"meta.ccy": "USD"}, exact=True) == [
+                {"symbol": "AAPL", "meta": {"ccy": "USD"}}
+            ]
     finally:
         store.close()
         text_store.close()
@@ -182,6 +227,13 @@ def test_sqlite_store_supports_none_type_values() -> None:
         str,
         NoneType,
     )
+    key_store = _from_sql(
+        "sqlite:///:memory:",
+        "json_key_versions",
+        int,
+        dict,
+        NoneType,
+    )
     try:
         assert store.put(10, "item", None) is True
         assert store.put(10, "item", None) is False
@@ -195,8 +247,15 @@ def test_sqlite_store_supports_none_type_values() -> None:
             ValueError, match="must be greater than the latest timestamp"
         ):
             store.put(9, "item", None)
+        assert key_store.put(10, {"symbol": "OLD"}, None) is True
+        assert key_store.put(20, {"symbol": "AAPL"}, None) is True
+        assert key_store.get_keys_matching({"symbol": "old"}, as_of=15) == [
+            {"symbol": "OLD"}
+        ]
+        assert key_store.get_keys_matching({"symbol": "old"}) == []
     finally:
         store.close()
+        key_store.close()
 
 
 def _assert_datetime_timestamp_behavior(store: AsOfStoreABC) -> None:

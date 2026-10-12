@@ -1,11 +1,41 @@
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ._view import AsOfView
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
+
+
+def _matches_fields(
+    value: object,
+    filters: Mapping[str, str] | Sequence[tuple[str, str]],
+    *,
+    exact: bool,
+) -> bool:
+    filter_items = filters.items() if isinstance(filters, Mapping) else filters
+    for field, query in filter_items:
+        if not isinstance(field, str) or not field:
+            raise ValueError("filter field names must be non-empty strings")
+        if not isinstance(query, str):
+            raise TypeError("filter values must be strings")
+    for field, query in filter_items:
+        field_value = value
+        for part in field.split("."):
+            if isinstance(field_value, Mapping):
+                field_value = field_value.get(part)
+            else:
+                field_value = getattr(field_value, part, None)
+            if field_value is None:
+                break
+        if field_value is None or isinstance(field_value, (Mapping, list, tuple)):
+            return False
+        actual = str(field_value).casefold()
+        expected = query.casefold()
+        if not (actual == expected if exact else expected in actual):
+            return False
+    return True
 
 
 class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
@@ -23,6 +53,39 @@ class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
     @abstractmethod
     def get_all(self, as_of: Timestamp | None = None) -> list[Value | None]:
         raise NotImplementedError
+
+    def get_all_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Value | None]:
+        """Return latest values matching string fields in a mapping or model.
+
+        Field names may use dotted paths for nested mappings. This default
+        implementation filters values returned by ``get_all``; SQL backends
+        override it to perform the filtering in the database.
+        """
+        if not filters:
+            return self.get_all(as_of)
+        matches: list[Value | None] = []
+        for value in self.get_all(as_of):
+            if value is not None and _matches_fields(value, filters, exact=exact):
+                matches.append(value)
+        return matches
+
+    def get_keys_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        """Return stored keys matching JSON fields when a backend supports it."""
+        raise NotImplementedError(
+            "get_keys_matching is not supported by this store backend"
+        )
 
     def get_unique_set(
         self, field: str, as_of: Timestamp | None = None

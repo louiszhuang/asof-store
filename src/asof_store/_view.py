@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from types import TracebackType
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,28 @@ class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
 
     def get(self, key: Key) -> Value | None:
         return self._store.get(self._as_of, key)
+
+    def get_all_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        *,
+        exact: bool = False,
+    ) -> list[Value | None]:
+        """Return values in this view that match JSON fields."""
+        return self._store.get_all_matching(
+            filters, self._as_of, exact=exact
+        )
+
+    def get_keys_matching(
+        self,
+        filters: Mapping[str, str] | Sequence[tuple[str, str]],
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        """Return matching JSON keys visible at this view's timestamp."""
+        return self._store.get_keys_matching(
+            filters, self._as_of, exact=exact
+        )
 
     def __enter__(self) -> AsOfView[Timestamp, Key, Value]:
         return self

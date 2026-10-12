@@ -88,6 +88,19 @@ Pydantic model field from those latest values. Supplying `as_of` limits each
 query to versions at or before that timestamp. Missing or null fields appear
 as `None` in the set.
 
+Use `get_all_matching(filters, as_of=None, exact=False)` to select mapping or
+Pydantic values by string fields. Filters are combined with AND, matching is a
+case-insensitive substring by default, and dotted names select nested mapping
+fields. Set `exact=True` for case-insensitive exact matching. SQL stores apply
+these filters before decoding result values; memory stores use the same matching
+rules in Python. `AsOfView.get_all_matching(filters, exact=False)` applies the
+view's fixed timestamp.
+
+`get_keys_matching(filters, as_of=None, exact=False)` applies the same filtering
+rules to JSON-compatible keys. This supports stores that retain records as keys
+with `NoneType` values. `AsOfView.get_keys_matching(filters, exact=False)` uses
+the view's fixed timestamp.
+
 ## Interactive Brokers data (optional)
 
 Install the Zapros extra to query the Interactive Brokers UK web API:
