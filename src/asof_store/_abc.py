@@ -38,6 +38,47 @@ def _matches_fields(
     return True
 
 
+def _field_value(value: object, field: str) -> object:
+    field_value = value
+    for part in field.split("."):
+        if isinstance(field_value, Mapping):
+            field_value = field_value.get(part)
+        else:
+            field_value = getattr(field_value, part, None)
+        if field_value is None:
+            break
+    return field_value
+
+
+def _matches_terms(
+    value: object,
+    terms: Sequence[str],
+    fields: Sequence[str],
+    *,
+    exact: bool,
+) -> bool:
+    for term in terms:
+        if not isinstance(term, str) or not term:
+            raise ValueError("search terms must be non-empty strings")
+    for field in fields:
+        if not isinstance(field, str) or not field:
+            raise ValueError("field names must be non-empty strings")
+    for term in terms:
+        expected = term.casefold()
+        if not any(
+            (actual := _field_value(value, field)) is not None
+            and not isinstance(actual, (Mapping, list, tuple))
+            and (
+                str(actual).casefold() == expected
+                if exact
+                else expected in str(actual).casefold()
+            )
+            for field in fields
+        ):
+            return False
+    return True
+
+
 class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
     """Abstract interface implemented by versioned store backends."""
 
@@ -75,6 +116,24 @@ class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
                 matches.append(value)
         return matches
 
+    def get_all_matching_terms(
+        self,
+        terms: Sequence[str],
+        fields: Sequence[str],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Value | None]:
+        """Match every term against at least one field in each latest value."""
+        if not terms:
+            return self.get_all(as_of)
+        return [
+            value
+            for value in self.get_all(as_of)
+            if value is not None
+            and _matches_terms(value, terms, fields, exact=exact)
+        ]
+
     def get_keys_matching(
         self,
         filters: Mapping[str, str] | Sequence[tuple[str, str]],
@@ -85,6 +144,19 @@ class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
         """Return stored keys matching JSON fields when a backend supports it."""
         raise NotImplementedError(
             "get_keys_matching is not supported by this store backend"
+        )
+
+    def get_keys_matching_terms(
+        self,
+        terms: Sequence[str],
+        fields: Sequence[str],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        """Match every term against at least one field in JSON-compatible keys."""
+        raise NotImplementedError(
+            "get_keys_matching_terms is not supported by this store backend"
         )
 
     def get_unique_set(

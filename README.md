@@ -101,6 +101,11 @@ rules to JSON-compatible keys. This supports stores that retain records as keys
 with `NoneType` values. `AsOfView.get_keys_matching(filters, exact=False)` uses
 the view's fixed timestamp.
 
+For fuzzy lookups, use `get_all_matching_terms(terms, fields, as_of=None,
+exact=False)` or `get_keys_matching_terms(...)`. Every term must match at least
+one listed field, and all terms must match. SQL backends combine these checks in
+the database before decoding matching values or keys.
+
 ## Interactive Brokers data (optional)
 
 Install the Zapros extra to query the Interactive Brokers UK web API:

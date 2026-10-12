@@ -22,6 +22,7 @@ from sqlalchemy import (
     Uuid,
     create_engine,
     func,
+    or_,
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -67,6 +68,43 @@ def _sql_type(python_type: type[Any]) -> TypeEngine[Any]:
     if _uses_json(python_type):
         return JSON().with_variant(JSONB, "postgresql")
     return LargeBinary()
+
+
+def _json_terms_conditions(
+    column: Any,
+    terms: Sequence[str],
+    fields: Sequence[str],
+    *,
+    exact: bool,
+) -> list[Any]:
+    if not terms:
+        return []
+    if not fields:
+        return [False]
+    expressions = []
+    for field in fields:
+        if not isinstance(field, str) or not field:
+            raise ValueError("field names must be non-empty strings")
+        expression = column
+        for part in field.split("."):
+            if not part:
+                raise ValueError(f"invalid dotted field name: {field!r}")
+            expression = expression[part]
+        expressions.append(func.lower(expression.as_string()))
+
+    conditions = []
+    for term in terms:
+        if not isinstance(term, str) or not term:
+            raise ValueError("search terms must be non-empty strings")
+        normalized_term = term.casefold()
+        matches = [
+            expression == normalized_term
+            if exact
+            else expression.contains(normalized_term, autoescape=True)
+            for expression in expressions
+        ]
+        conditions.append(or_(*matches))
+    return conditions
 
 
 def _uses_json(python_type: type[Any]) -> bool:
@@ -318,9 +356,7 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
     ) -> list[Value | None]:
         """Filter latest JSON values in SQL before decoding them."""
         if not (self._value_type is dict or _is_pydantic_model(self._value_type)):
-            raise TypeError(
-                "get_all_matching requires dict or Pydantic model values"
-            )
+            raise TypeError("get_all_matching requires dict or Pydantic model values")
         if not filters:
             return self.get_all(as_of)
 
@@ -345,9 +381,32 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
                 else text_value.contains(normalized_query, autoescape=True)
             )
 
-        statement = (
-            select(latest.c.value).where(*conditions).order_by(latest.c.key)
+        statement = select(latest.c.value).where(*conditions).order_by(latest.c.key)
+        with self._engine.connect() as connection:
+            values = connection.scalars(statement).all()
+        return [_decode(self._value_type, value) for value in values]
+
+    def get_all_matching_terms(
+        self,
+        terms: Sequence[str],
+        fields: Sequence[str],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Value | None]:
+        """Match every term against at least one JSON value field in SQL."""
+        if not (self._value_type is dict or _is_pydantic_model(self._value_type)):
+            raise TypeError(
+                "get_all_matching_terms requires dict or Pydantic model values"
+            )
+        if not terms:
+            return self.get_all(as_of)
+        latest = self._latest_per_key(as_of)
+        conditions = [latest.c.row_number == 1]
+        conditions.extend(
+            _json_terms_conditions(latest.c.value, terms, fields, exact=exact)
         )
+        statement = select(latest.c.value).where(*conditions).order_by(latest.c.key)
         with self._engine.connect() as connection:
             values = connection.scalars(statement).all()
         return [_decode(self._value_type, value) for value in values]
@@ -390,11 +449,30 @@ class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
                     if exact
                     else text_value.contains(normalized_query, autoescape=True)
                 )
-            statement = (
-                select(latest.c.key)
-                .where(*conditions)
-                .order_by(latest.c.key)
+            statement = select(latest.c.key).where(*conditions).order_by(latest.c.key)
+        with self._engine.connect() as connection:
+            values = connection.scalars(statement).all()
+        return [_decode(self._key_type, value) for value in values]
+
+    def get_keys_matching_terms(
+        self,
+        terms: Sequence[str],
+        fields: Sequence[str],
+        as_of: Timestamp | None = None,
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        """Match every term against at least one JSON key field in SQL."""
+        if not (self._key_type is dict or _is_pydantic_model(self._key_type)):
+            raise TypeError(
+                "get_keys_matching_terms requires dict or Pydantic model keys"
             )
+        latest = self._latest_per_key(as_of)
+        conditions = [latest.c.row_number == 1]
+        conditions.extend(
+            _json_terms_conditions(latest.c.key, terms, fields, exact=exact)
+        )
+        statement = select(latest.c.key).where(*conditions).order_by(latest.c.key)
         with self._engine.connect() as connection:
             values = connection.scalars(statement).all()
         return [_decode(self._key_type, value) for value in values]

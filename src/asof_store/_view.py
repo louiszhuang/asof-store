@@ -35,6 +35,18 @@ class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
             filters, self._as_of, exact=exact
         )
 
+    def get_all_matching_terms(
+        self,
+        terms: Sequence[str],
+        fields: Sequence[str],
+        *,
+        exact: bool = False,
+    ) -> list[Value | None]:
+        """Match all terms against fields in values at this timestamp."""
+        return self._store.get_all_matching_terms(
+            terms, fields, self._as_of, exact=exact
+        )
+
     def get_keys_matching(
         self,
         filters: Mapping[str, str] | Sequence[tuple[str, str]],
@@ -44,6 +56,18 @@ class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
         """Return matching JSON keys visible at this view's timestamp."""
         return self._store.get_keys_matching(
             filters, self._as_of, exact=exact
+        )
+
+    def get_keys_matching_terms(
+        self,
+        terms: Sequence[str],
+        fields: Sequence[str],
+        *,
+        exact: bool = False,
+    ) -> list[Key]:
+        """Match all terms against keys visible at this timestamp."""
+        return self._store.get_keys_matching_terms(
+            terms, fields, self._as_of, exact=exact
         )
 
     def __enter__(self) -> AsOfView[Timestamp, Key, Value]:

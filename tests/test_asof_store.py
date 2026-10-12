@@ -129,6 +129,9 @@ def test_memory_store_get_all_matching_uses_latest_value_and_nested_fields() -> 
         {"symbol": "AAPL", "meta": {"country": "US"}},
         {"symbol": "MSFT", "meta": {"country": "US"}},
     ]
+    assert store.get_all_matching_terms(
+        ["aap", "us"], ["symbol", "meta.country"]
+    ) == [{"symbol": "AAPL", "meta": {"country": "US"}}]
     with store.as_of(1) as snapshot:
         assert snapshot.get_all_matching({"symbol": "old"}, exact=True) == [
             {"symbol": "OLD", "meta": {"country": "GB"}}
@@ -208,6 +211,9 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
         assert store.get_all_matching({"meta.ccy": "usd"}, as_of=55) == [
             {"symbol": "AAPL", "meta": {"ccy": "USD"}}
         ]
+        assert store.get_all_matching_terms(
+            ["aap", "usd"], ["symbol", "meta.ccy"], as_of=55
+        ) == [{"symbol": "AAPL", "meta": {"ccy": "USD"}}]
         with store.as_of(55) as snapshot:
             assert snapshot.get_all_matching({"meta.ccy": "USD"}, exact=True) == [
                 {"symbol": "AAPL", "meta": {"ccy": "USD"}}
@@ -253,6 +259,12 @@ def test_sqlite_store_supports_none_type_values() -> None:
             {"symbol": "OLD"}
         ]
         assert key_store.get_keys_matching({"symbol": "old"}) == []
+        assert key_store.get_keys_matching_terms(
+            ["app", "old"], ["symbol"], as_of=15
+        ) == []
+        assert key_store.get_keys_matching_terms(
+            ["app"], ["symbol"], as_of=25
+        ) == [{"symbol": "AAPL"}]
     finally:
         store.close()
         key_store.close()
