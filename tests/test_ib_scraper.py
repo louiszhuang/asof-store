@@ -9,7 +9,13 @@ import pytest
 
 from asof_store import AsOfStore, ib_scraper
 from asof_store.ib import InstrumentScrapePage, InstrumentScrapeSummary
-from asof_store.ib_models import Exchange, Fund, Instrument, InstrumentSummaryItem
+from asof_store.ib_models import (
+    Exchange,
+    Fund,
+    Instrument,
+    InstrumentSummaryItem,
+    ProductsResponse,
+)
 
 
 def _instrument(
@@ -148,6 +154,186 @@ def test_scrape_and_store_classifies_records_and_prints_details(
         "newField": {"before": None, "after": "added"},
         "symbol": {"before": "FIRST", "after": "FIRST-UPDATED"},
     }
+
+
+def test_scrape_and_reconcile_probes_only_missing_intervals(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = AsOfStore.from_memory()
+    missing_store = AsOfStore.from_memory()
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    remote = [
+        _instrument(index + 1, f"{chr(65 + index // 100)}{index:03d}")
+        for index in range(400)
+    ]
+    for index, instrument in enumerate(remote):
+        if 100 <= index < 200:
+            continue
+        assert instrument.conid is not None
+        store.put(timestamp, instrument.conid, instrument)
+
+    requested_pages: list[int] = []
+    monkeypatch.setattr(
+        ib_scraper,
+        "get_instrument_summary",
+        lambda *args, **kwargs: [
+            InstrumentSummaryItem(productType="STK", totalCount=len(remote))
+        ],
+    )
+
+    def get_page(
+        product_type: str,
+        client: object,
+        *,
+        page_number: int,
+        page_size: int,
+        **kwargs: Any,
+    ) -> ProductsResponse:
+        requested_pages.append(page_number)
+        start = (page_number - 1) * page_size
+        return ProductsResponse(products=remote[start : start + page_size])
+
+    monkeypatch.setattr(ib_scraper, "get_products_by_filters", get_page)
+    result = ib_scraper.scrape_and_reconcile_instruments(
+        store,
+        missing_primary_key_store=missing_store,
+        page_size=100,
+        product_type=["STK"],
+        client=object(),
+    )
+
+    assert set(requested_pages) == {1, 2, 4}
+    assert len(requested_pages) == 3
+    assert result.new_with_primary_key == 100
+    assert len(store.get_all()) == len(remote)
+    diagnostics = capsys.readouterr().err
+    assert "split product_type=STK pages=1-4" in diagnostics
+    assert "complete product_type=STK pages=2-4" in diagnostics
+    assert "page received product_type=STK page=2 count=100" in diagnostics
+    assert "local_matches=300->400" in diagnostics
+    store.close()
+    missing_store.close()
+
+
+@pytest.mark.parametrize(
+    ("include_middle_page", "expected_pages", "expected_new"),
+    [
+        (True, set(), 0),
+        (False, {1, 2, 3}, 100),
+    ],
+)
+def test_scrape_and_reconcile_handles_duplicate_sort_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    include_middle_page: bool,
+    expected_pages: set[int],
+    expected_new: int,
+) -> None:
+    store = AsOfStore.from_memory()
+    missing_store = AsOfStore.from_memory()
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    remote = [_instrument(index + 1, "DUPLICATE") for index in range(300)]
+    local = remote if include_middle_page else remote[:100] + remote[200:]
+    for instrument in local:
+        assert instrument.conid is not None
+        store.put(timestamp, instrument.conid, instrument)
+
+    requested_pages: list[int] = []
+    monkeypatch.setattr(
+        ib_scraper,
+        "get_instrument_summary",
+        lambda *args, **kwargs: [
+            InstrumentSummaryItem(productType="STK", totalCount=len(remote))
+        ],
+    )
+
+    def get_page(
+        product_type: str,
+        client: object,
+        *,
+        page_number: int,
+        page_size: int,
+        **kwargs: Any,
+    ) -> ProductsResponse:
+        requested_pages.append(page_number)
+        start = (page_number - 1) * page_size
+        return ProductsResponse(products=remote[start : start + page_size])
+
+    monkeypatch.setattr(ib_scraper, "get_products_by_filters", get_page)
+    result = ib_scraper.scrape_and_reconcile_instruments(
+        store,
+        missing_primary_key_store=missing_store,
+        page_size=100,
+        product_type=["STK"],
+        client=object(),
+    )
+
+    assert set(requested_pages) == expected_pages
+    assert result.new_with_primary_key == expected_new
+    assert len(store.get_all()) == len(remote)
+    diagnostics = capsys.readouterr().err
+    if include_middle_page:
+        assert "reason=local_count_matches_total local=300 remote=300" in diagnostics
+    else:
+        assert "duplicate region incomplete product_type=STK pages=1-3" in diagnostics
+        assert "duplicate boundary search start product_type=STK" in diagnostics
+        assert "phase=lower" in diagnostics
+        assert "duplicate region count product_type=STK" in diagnostics
+        assert "page received product_type=STK page=2 count=100" in diagnostics
+    store.close()
+    missing_store.close()
+
+
+def test_scrape_reconcile_warns_when_duplicate_search_probes_far_pages(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store = AsOfStore.from_memory()
+    missing_store = AsOfStore.from_memory()
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    remote = [_instrument(index + 1, "DUPLICATE") for index in range(1000)]
+    for instrument in remote[:300] + remote[500:]:
+        assert instrument.conid is not None
+        store.put(timestamp, instrument.conid, instrument)
+
+    requested_pages: list[int] = []
+    monkeypatch.setattr(
+        ib_scraper,
+        "get_instrument_summary",
+        lambda *args, **kwargs: [
+            InstrumentSummaryItem(productType="STK", totalCount=len(remote))
+        ],
+    )
+
+    def get_page(
+        product_type: str,
+        client: object,
+        *,
+        page_number: int,
+        page_size: int,
+        **kwargs: Any,
+    ) -> ProductsResponse:
+        requested_pages.append(page_number)
+        start = (page_number - 1) * page_size
+        return ProductsResponse(products=remote[start : start + page_size])
+
+    monkeypatch.setattr(ib_scraper, "get_products_by_filters", get_page)
+    result = ib_scraper.scrape_and_reconcile_instruments(
+        store,
+        missing_primary_key_store=missing_store,
+        page_size=100,
+        product_type=["STK"],
+        client=object(),
+    )
+
+    assert result.new_with_primary_key == 200
+    assert set(requested_pages) == set(range(1, 11))
+    diagnostics = capsys.readouterr().err
+    assert "warning product_type=STK phase=lower" in diagnostics
+    assert "reason=probe_outside_neighbor_page" in diagnostics
+    store.close()
+    missing_store.close()
 
 
 def test_async_scrape_and_store_saves_instrument_models(
@@ -378,6 +564,69 @@ def test_cli_uses_default_instrument_template_table(
         Instrument,
         NoneType,
     )
+
+
+def test_scrape_reconcile_cli_wires_store_and_filters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeStore:
+        def close(self) -> None:
+            pass
+
+    created: list[tuple[Any, ...]] = []
+    captured: dict[str, Any] = {}
+    store = FakeStore()
+    monkeypatch.setattr(
+        AsOfStore,
+        "from_sql",
+        classmethod(lambda cls, *args: created.append(args) or store),
+    )
+
+    def fake_reconcile(store_arg: Any, **kwargs: Any) -> ib_scraper.ScrapeReport:
+        captured.update(kwargs)
+        return ib_scraper.ScrapeReport(as_of=datetime(2026, 1, 1, tzinfo=UTC))
+
+    monkeypatch.setattr(
+        ib_scraper,
+        "scrape_and_reconcile_instruments",
+        fake_reconcile,
+    )
+
+    result = ib_scraper.main(
+        [
+            "scrape-reconcile",
+            "--sql-uri",
+            "sqlite:///:memory:",
+            "--table-name",
+            "instruments",
+            "--missing-primary-key-table-name",
+            "templates",
+            "--page-size",
+            "100",
+            "--product-type",
+            "STK",
+            "--product-country",
+            "US",
+            "--sort-field",
+            "currency",
+            "--sort-direction",
+            "desc",
+            "--new-product",
+            "T",
+        ]
+    )
+
+    assert result == 0
+    assert created == [
+        ("sqlite:///:memory:", "instruments", datetime, int, Instrument),
+        ("sqlite:///:memory:", "templates", datetime, Instrument, NoneType),
+    ]
+    assert captured["page_size"] == 100
+    assert captured["product_type"] == ["STK"]
+    assert captured["product_country"] == ["US"]
+    assert captured["sort_field"] == "currency"
+    assert captured["sort_direction"] == "desc"
+    assert captured["new_product"] == "T"
 
 
 def test_instrument_cli_dry_run_reports_summary_without_store(

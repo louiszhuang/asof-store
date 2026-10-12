@@ -235,6 +235,41 @@ Use `--dry-run` to request and report only the filtered instrument summary;
 this mode does not require `--sql-uri`, fetch product pages, or write to a
 store.
 
+### Reconciling missing instruments
+
+Use `scrape-reconcile` to fill gaps in an existing instrument store while
+avoiding pages whose sorted intervals are already complete:
+
+```powershell
+uv run ass scrape-reconcile --sql-uri "sqlite:///ib-instruments.db"
+```
+
+It uses the same table names, page size, product filters, sort options,
+progress reporting, and print options as `scrape-instruments`. The command
+checks each product type independently, fetches the first and last pages, then
+probes only intervals whose remote position count exceeds the matching local
+instrument count. If the matching local count already equals IB's reported
+total, no product pages are requested. Sort-key runs that span page boundaries
+are checked as a whole, so duplicate symbols or other repeated sort values are
+handled without assuming a unique ordering key. Instruments from fetched pages
+are persisted immediately, including instruments without a conid.
+Reconciliation diagnostics are written to standard error for each completed
+region and each region split for further probing, including page ranges,
+boundary sort keys, and local versus remote counts where available. Page
+requests report their first and last sort values, and duplicate-run boundary
+searches report each probe and the count calculation used to decide whether the
+run is complete or must be fetched in full. Duplicate-boundary probes more than
+one page from the reconciliation boundary are marked with a warning so a wide
+or unexpected repeated-key region is visible during diagnosis. Local counts are
+deduplicated by conid, and a fetched version replaces that conid's local sort
+value for subsequent interval checks, so probing an already-populated page does
+not inflate the completeness count.
+
+Reconciliation assumes the selected local instruments are a subset of the
+current IB results. It adds or updates fetched instruments but does not delete
+local records that are no longer returned by IB; use `scrape-instruments` when
+you need a full scan.
+
 ### Scraping funds into an as-of store
 
 IB uses a dedicated funds scanner endpoint and returns a `total` count with
