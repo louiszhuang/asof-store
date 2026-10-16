@@ -5,7 +5,9 @@ description = "asof store provides a simple and efficient way to store and retri
 readme = "README.md"
 authors = [{ name = "Louis Zhuang", email = "yzhuang@outlook.com" }]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "pydantic>=2.14.1",
+]
 
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -14,15 +16,15 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-sql-sqlite = ["sqlalchemy>=2.1"]
-sql-postgres = ["sqlalchemy>=2.1", "psycopg[binary]>=3.3"]
+sql-sqlite = ["polars>=2", "adbc-driver-sqlite>=1.8"]
+sql-postgres = ["polars>=2", "adbc-driver-postgresql>=1.8"]
 dev = ["pytest>=9"]
 
 [tool.pytest.ini_options]
 markers = ["integration: tests that depend on live external services"]
 
 [dependency-groups]
-dev = ["prek>=0.5.5", "ruff>=0.17.0", "ty>=0.0.86"]
+dev = []
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]

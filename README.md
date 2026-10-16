@@ -34,9 +34,10 @@ earlier timestamp raises `ValueError`.
 Passing `None` as `as_of` to `get` or `store.as_of(None)` selects the latest
 available value, matching `get_all(None)` and `get_unique_set(field, None)`.
 
-## SQL storage (optional)
+## Polars and ADBC SQL storage (optional)
 
-Install the optional extra matching your database:
+Install the optional extra for your database. Polars reads query results via
+the Apache Arrow ADBC driver:
 
 ```sh
 python -m pip install "asof-store[sql-sqlite]"
@@ -63,7 +64,7 @@ postgres_store = AsOfStore.from_sql(
 ```
 
 Native SQL types are used where supported, including JSONB for `dict`, `list`,
-`tuple`, and Pydantic `BaseModel` subclasses on PostgreSQL (JSON on SQLite).
+`tuple`, and Pydantic `BaseModel` subclasses on PostgreSQL (JSON text on SQLite).
 Tuples are stored as JSON arrays and restored as tuples. Pydantic models are
 serialized with `model_dump(mode="json", exclude_unset=True)` and restored to
 their declared model type when read. Other Python types use pickle. SQL stores
@@ -75,7 +76,7 @@ Use a distinct table name for each type combination; an existing table is not
 altered if its schema differs. Other Python values are stored with pickle, so
 only use SQL stores with databases you trust, since loading a database
 containing untrusted pickle data can execute code. Call `store.close()` when
-finished to release SQLAlchemy's pooled connections.
+finished to release the ADBC connection.
 SQL timestamps must use sortable scalar types supported by the database (such
 as integers, strings, dates, datetimes, decimals, and UUIDs); compound JSON and
 arbitrary pickle-backed timestamps are rejected. Boolean timestamps are not
@@ -92,9 +93,9 @@ Use `get_all_matching(filters, as_of=None, exact=False)` to select mapping or
 Pydantic values by string fields. Filters are combined with AND, matching is a
 case-insensitive substring by default, and dotted names select nested mapping
 fields. Set `exact=True` for case-insensitive exact matching. SQL stores apply
-these filters before decoding result values; memory stores use the same matching
-rules in Python. `AsOfView.get_all_matching(filters, exact=False)` applies the
-view's fixed timestamp.
+these filters after reading latest values with Polars; memory stores use the
+same matching rules in Python. `AsOfView.get_all_matching(filters, exact=False)`
+applies the view's fixed timestamp.
 
 `get_keys_matching(filters, as_of=None, exact=False)` applies the same filtering
 rules to JSON-compatible keys. This supports stores that retain records as keys
@@ -103,13 +104,13 @@ the view's fixed timestamp.
 
 For fuzzy lookups, use `get_all_matching_terms(terms, fields, as_of=None,
 exact=False)` or `get_keys_matching_terms(...)`. Every term must match at least
-one listed field, and all terms must match. SQL backends combine these checks in
-the database before decoding matching values or keys.
+one listed field, and all terms must match. SQL backends apply these checks
+after reading latest values with Polars.
 
 ## PostgreSQL integration tests
 
 The PostgreSQL integration tests use `postgresql://louis@fre.local/louis`.
-Install the PostgreSQL and test extras, then enable them explicitly:
+Install the PostgreSQL and development extras, then enable them explicitly:
 
 ```powershell
 uv sync --extra sql-postgres --extra dev

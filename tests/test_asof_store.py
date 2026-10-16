@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import NoneType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+import polars as pl
 import pytest
 
 from asof_store import AsOfStore, AsOfStoreABC, AsOfView
@@ -26,9 +27,17 @@ def _from_sql[T: SupportsAllComparisons, K, V](
             sql_uri, table_name, timestamp_type, key_type, value_type
         )
     except ImportError as exc:
-        if "SQL storage requires optional dependencies" in str(exc):
+        if "requires ADBC" in str(
+            exc
+        ) or "SQL storage requires optional dependencies" in str(exc):
             pytest.skip(str(exc))
         raise
+
+
+def _sqlite_columns(store: SqlBackend, table_name: str) -> list[dict[str, Any]]:
+    return pl.read_database(
+        f'PRAGMA table_info("{table_name}")', store._connection
+    ).to_dicts()
 
 
 def test_get_returns_latest_value_at_or_before_timestamp() -> None:
@@ -129,9 +138,9 @@ def test_memory_store_get_all_matching_uses_latest_value_and_nested_fields() -> 
         {"symbol": "AAPL", "meta": {"country": "US"}},
         {"symbol": "MSFT", "meta": {"country": "US"}},
     ]
-    assert store.get_all_matching_terms(
-        ["aap", "us"], ["symbol", "meta.country"]
-    ) == [{"symbol": "AAPL", "meta": {"country": "US"}}]
+    assert store.get_all_matching_terms(["aap", "us"], ["symbol", "meta.country"]) == [
+        {"symbol": "AAPL", "meta": {"country": "US"}}
+    ]
     with store.as_of(1) as snapshot:
         assert snapshot.get_all_matching({"symbol": "old"}, exact=True) == [
             {"symbol": "OLD", "meta": {"country": "GB"}}
@@ -223,9 +232,74 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
         text_store.close()
 
 
-def test_sqlite_store_supports_none_type_values() -> None:
-    from sqlalchemy import inspect
+@pytest.mark.parametrize("exact", [True, False])
+def test_postgres_term_search_pushes_filter_into_sql(
+    monkeypatch: pytest.MonkeyPatch, exact: bool
+) -> None:
+    store = _from_sql("sqlite:///:memory:", "exact_terms", int, str, dict)
+    statements: list[tuple[str, tuple]] = []
+    try:
+        store._postgres = True
 
+        def read(statement: str, parameters=()) -> pl.DataFrame:
+            statements.append((statement, tuple(parameters)))
+            return pl.DataFrame({"value": [{"symbol": "aapl", "type": "stk"}]})
+
+        monkeypatch.setattr(store, "_read", read)
+        monkeypatch.setattr(
+            store,
+            "get_all",
+            lambda *_args, **_kwargs: pytest.fail("exact search loaded all values"),
+        )
+
+        assert store.get_all_matching_terms(
+            ["AAPL", "STK"], ["symbol", "type"], exact=exact
+        ) == [{"symbol": "aapl", "type": "stk"}]
+        statement, parameters = statements[0]
+        assert "NOT EXISTS" in statement
+        assert "ROW_NUMBER()" not in statement
+        assert 'lower(jsonb_extract_path_text("value"' in statement
+        assert " LIKE " in statement
+        if exact:
+            assert parameters == ("aapl", "aapl", "stk", "stk")
+        else:
+            assert parameters == ("%aapl%", "%aapl%", "%stk%", "%stk%")
+    finally:
+        store.close()
+
+
+def test_postgres_trigram_indexes_are_idempotently_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _from_sql("sqlite:///:memory:", "search_indexes", int, str, dict)
+    statements: list[str] = []
+    try:
+        store._postgres = True
+        monkeypatch.setattr(
+            store, "_execute", lambda statement: statements.append(statement)
+        )
+
+        names = store.create_trigram_indexes(
+            ["symbol", "contract.exchange", "symbol"], column="value"
+        )
+
+        assert len(names) == 1
+        assert names[0].startswith("asof_trgm_")
+        assert statements[0] == "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+        assert "USING GIN" in statements[1]
+        assert (
+            "lower(jsonb_extract_path_text(\"value\", 'symbol')) gin_trgm_ops"
+            in statements[1]
+        )
+        assert (
+            "lower(jsonb_extract_path_text(\"value\", 'contract', 'exchange')) "
+            "gin_trgm_ops"
+        ) in statements[1]
+    finally:
+        store.close()
+
+
+def test_sqlite_store_supports_none_type_values() -> None:
     store = _from_sql(
         "sqlite:///:memory:",
         "none_versions",
@@ -246,8 +320,7 @@ def test_sqlite_store_supports_none_type_values() -> None:
         assert store.get(10, "item") is None
         assert store.put(20, "item", None) is False
         assert {
-            column["name"]
-            for column in inspect(store._engine).get_columns("none_versions")
+            column["name"] for column in _sqlite_columns(store, "none_versions")
         } == {"key", "timestamp"}
         with pytest.raises(
             ValueError, match="must be greater than the latest timestamp"
@@ -258,15 +331,14 @@ def test_sqlite_store_supports_none_type_values() -> None:
         assert key_store.get_keys_matching({"symbol": "old"}, as_of=15) == [
             {"symbol": "OLD"}
         ]
-        assert key_store.get_keys_matching({"symbol": "old"}) == [
-            {"symbol": "OLD"}
+        assert key_store.get_keys_matching({"symbol": "old"}) == [{"symbol": "OLD"}]
+        assert (
+            key_store.get_keys_matching_terms(["app", "old"], ["symbol"], as_of=15)
+            == []
+        )
+        assert key_store.get_keys_matching_terms(["aap"], ["symbol"], as_of=25) == [
+            {"symbol": "AAPL"}
         ]
-        assert key_store.get_keys_matching_terms(
-            ["app", "old"], ["symbol"], as_of=15
-        ) == []
-        assert key_store.get_keys_matching_terms(
-            ["aap"], ["symbol"], as_of=25
-        ) == [{"symbol": "AAPL"}]
     finally:
         store.close()
         key_store.close()
@@ -293,7 +365,7 @@ def _assert_datetime_timestamp_behavior(store: AsOfStoreABC) -> None:
         assert snapshot.get("event") == "original"
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")
+        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")  # noqa: DTZ001
 
 
 def test_sqlite_datetime_timestamp_type() -> None:
@@ -305,29 +377,17 @@ def test_sqlite_datetime_timestamp_type() -> None:
 
 
 def test_json_type_uses_postgresql_jsonb() -> None:
-    pytest.importorskip("sqlalchemy")
-    from sqlalchemy import Column, MetaData, Table
-    from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
-    from sqlalchemy.schema import CreateTable
-
     from asof_store._sql import _sql_type
 
-    table = Table(
-        "jsonb_probe",
-        MetaData(),
-        Column("timestamp", _sql_type(dict)),
-        Column("key", _sql_type(list)),
-        Column("value", _sql_type(dict)),
-        Column("tuple_value", _sql_type(tuple)),
-    )
-    ddl = str(CreateTable(table).compile(dialect=postgresql_dialect()))
-    assert ddl.count("JSONB") == 4
+    assert _sql_type(dict, postgres=True) == "JSONB"
+    assert _sql_type(list, postgres=True) == "JSONB"
+    assert _sql_type(tuple, postgres=True) == "JSONB"
+    assert _sql_type(dict, postgres=False) == "TEXT"
 
 
 def test_pydantic_models_use_json_sql_type_and_round_trip_on_sqlite() -> None:
     pytest.importorskip("pydantic")
     from pydantic import BaseModel
-    from sqlalchemy import inspect
 
     class Payload(BaseModel):
         name: str
@@ -340,10 +400,10 @@ def test_pydantic_models_use_json_sql_type_and_round_trip_on_sqlite() -> None:
         assert store.get(1, "payload") == expected
         column_type = next(
             column
-            for column in inspect(store._engine).get_columns("pydantic_values")
+            for column in _sqlite_columns(store, "pydantic_values")
             if column["name"] == "value"
         )["type"]
-        assert str(column_type).upper() == "JSON"
+        assert column_type == "TEXT"
     finally:
         store.close()
 
@@ -365,8 +425,6 @@ def test_sqlite_json_values_round_trip(value_type: type, value: dict | list) -> 
 
 
 def test_sqlite_tuple_values_and_keys_round_trip_as_json() -> None:
-    from sqlalchemy import inspect
-
     store = _from_sql("sqlite:///:memory:", "tuple_values", int, tuple, tuple)
     try:
         key = ("tenant", "item")
@@ -375,11 +433,11 @@ def test_sqlite_tuple_values_and_keys_round_trip_as_json() -> None:
         assert store.get(1, key) == value
 
         column_types = {
-            column["name"]: str(column["type"]).upper()
-            for column in inspect(store._engine).get_columns("tuple_values")
+            column["name"]: column["type"]
+            for column in _sqlite_columns(store, "tuple_values")
         }
-        assert column_types["key"] == "JSON"
-        assert column_types["value"] == "JSON"
+        assert column_types["key"] == "TEXT"
+        assert column_types["value"] == "TEXT"
     finally:
         store.close()
 
@@ -483,17 +541,15 @@ def test_sqlite_supports_all_sortable_timestamp_types(
 
 
 def test_sql_store_uses_key_and_timestamp_as_composite_primary_key() -> None:
-    from sqlalchemy import inspect
-
     store = _from_sql("sqlite:///:memory:", "primary_key_versions", int, str, str)
     try:
-        inspector = inspect(store._engine)
-        assert inspector.get_pk_constraint("primary_key_versions")[
-            "constrained_columns"
+        columns = _sqlite_columns(store, "primary_key_versions")
+        assert [
+            column["name"]
+            for column in sorted(columns, key=lambda item: item["pk"])
+            if column["pk"]
         ] == ["key", "timestamp"]
-        assert {
-            column["name"] for column in inspector.get_columns("primary_key_versions")
-        } == {"key", "timestamp", "value"}
+        assert {column["name"] for column in columns} == {"key", "timestamp", "value"}
     finally:
         store.close()
 
@@ -502,7 +558,7 @@ def test_sql_store_uses_the_requested_table_name() -> None:
     table_name = "my_asof_versions"
     store = _from_sql("sqlite:///:memory:", table_name, int, str, dict)
     try:
-        assert store._versions.name == table_name
+        assert store._table_name == table_name
     finally:
         store.close()
 

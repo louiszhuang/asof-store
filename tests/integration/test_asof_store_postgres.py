@@ -1,14 +1,14 @@
+import json
 import os
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import NoneType
 from uuid import UUID, uuid4
 
+import polars as pl
 import pytest
 
-pytest.importorskip("sqlalchemy")
-
-from sqlalchemy import func, inspect, select
+pytest.importorskip("adbc_driver_postgresql")
 
 from asof_store import AsOfStore
 
@@ -33,6 +33,30 @@ _SORTABLE_TIMESTAMP_CASES = [
 ]
 
 
+def _query(store, statement: str, parameters: tuple = ()) -> pl.DataFrame:
+    return store._read(statement, parameters)
+
+
+def _json_value(value):
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def _column_types(store, table_name: str) -> dict[str, str]:
+    rows = _query(
+        store,
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = $1",
+        (table_name,),
+    )
+    return {row["column_name"]: row["data_type"] for row in rows.to_dicts()}
+
+
+def _drop_table(store, table_name: str) -> None:
+    store._connection.rollback()
+    store._execute(f'DROP TABLE IF EXISTS "{table_name}"')
+    store._connection.commit()
+
+
 def _assert_datetime_timestamp_behavior(store) -> None:
     initial = datetime(2024, 1, 1, 10, tzinfo=timezone(timedelta(hours=2)))
     equivalent_instant = datetime(2024, 1, 1, 6, tzinfo=timezone(-timedelta(hours=2)))
@@ -52,7 +76,7 @@ def _assert_datetime_timestamp_behavior(store) -> None:
     with store.as_of(datetime(2024, 1, 1, 8, 30, tzinfo=UTC)) as snapshot:
         assert snapshot.get("event") == "original"
     with pytest.raises(ValueError, match="timezone-aware"):
-        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")
+        store.put(datetime(2024, 1, 1, 10), "naive", "rejected")  # noqa: DTZ001
 
 
 def _assert_timestamp_type_ordering(store, earlier, later) -> None:
@@ -69,46 +93,37 @@ def _assert_timestamp_type_ordering(store, earlier, later) -> None:
 def test_postgresql_jsonb_round_trip_for_all_declared_fields() -> None:
     table_name = f"asof_jsonb_{uuid4().hex}"
     store = AsOfStore.from_sql(_POSTGRES_URI, table_name, int, list, dict)
-    engine = store._engine
     try:
         key = ["tenant", {"id": 7}]
         expected = {"payload": ["café", 1, True, None, {"nested": ["value"]}]}
         assert store.put(1, key, {"version": 1}) is True
         assert store.put(2, key, expected) is True
         assert store.put(3, key, expected) is False
-
         assert store.get(1, key) == {"version": 1}
         assert store.get(2, key) == expected
         assert store.get(3, ["missing"]) is None
-        with engine.connect() as connection:
-            version_count = connection.scalar(
-                select(func.count())
-                .select_from(store._versions)
-                .where(store._versions.c.key == key)
+
+        assert (
+            _query(store, f'SELECT count(*) AS count FROM "{table_name}"').item(
+                0, "count"
             )
-        assert version_count == 2
-
-        column_types = {
-            column["name"]: str(column["type"]).upper()
-            for column in inspect(engine).get_columns(table_name)
+            == 2
+        )
+        assert _column_types(store, table_name) == {
+            "timestamp": "bigint",
+            "key": "jsonb",
+            "value": "jsonb",
         }
-        assert column_types["timestamp"] == "BIGINT"
-        assert column_types["key"] == "JSONB"
-        assert column_types["value"] == "JSONB"
-
-        with engine.connect() as connection:
-            stored_timestamp, stored_key, stored_value = connection.execute(
-                select(
-                    store._versions.c.timestamp,
-                    store._versions.c.key,
-                    store._versions.c.value,
-                ).where(store._versions.c.timestamp == 1)
-            ).one()
-        assert stored_timestamp == 1
-        assert stored_key == key
-        assert stored_value == {"version": 1}
+        row = _query(
+            store,
+            f'SELECT timestamp, key, value FROM "{table_name}" WHERE timestamp = $1',
+            (1,),
+        ).row(0, named=True)
+        assert row["timestamp"] == 1
+        assert _json_value(row["key"]) == key
+        assert _json_value(row["value"]) == {"version": 1}
     finally:
-        store._versions.drop(engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -121,10 +136,9 @@ def test_postgresql_get_unique_set_uses_latest_value_per_key() -> None:
         assert store.put(1, "b", {"country": "FR"}) is True
         assert store.put(1, "c", {"country": None}) is True
         assert store.put(1, "d", {"region": "GB"}) is True
-
         assert store.get_unique_set("country") == {"FR", "US", None}
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -136,7 +150,6 @@ def test_postgresql_get_all_returns_latest_value_for_each_key() -> None:
         assert store.put(2, "a", {"country": "US"}) is True
         assert store.put(1, "b", {"country": "US"}) is True
         assert store.put(1, "c", {"country": None}) is True
-
         assert store.get_all(1) == [
             {"country": "CA"},
             {"country": "US"},
@@ -151,7 +164,7 @@ def test_postgresql_get_all_returns_latest_value_for_each_key() -> None:
         assert store.get_unique_set("country", 1) == {"CA", "US", None}
         assert store.get_unique_set("country", 0) == set()
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -163,21 +176,12 @@ def test_postgresql_tuples_round_trip_as_jsonb_arrays() -> None:
         value = ("first", "second")
         assert store.put(1, key, value) is True
         assert store.get(1, key) == value
-
-        column_types = {
-            column["name"]: str(column["type"]).upper()
-            for column in inspect(store._engine).get_columns(table_name)
-        }
-        assert column_types["key"] == "JSONB"
-        assert column_types["value"] == "JSONB"
-        with store._engine.connect() as connection:
-            stored_key, stored_value = connection.execute(
-                select(store._versions.c.key, store._versions.c.value)
-            ).one()
-        assert stored_key == ["tenant", "item"]
-        assert stored_value == ["first", "second"]
+        assert _column_types(store, table_name)["key"] == "jsonb"
+        row = _query(store, f'SELECT key, value FROM "{table_name}"').row(0, named=True)
+        assert _json_value(row["key"]) == ["tenant", "item"]
+        assert _json_value(row["value"]) == ["first", "second"]
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -195,12 +199,9 @@ def test_postgresql_none_type_store_omits_value_column() -> None:
         assert store.get(2, "item") is None
         assert store.get_all() == [None]
         assert store.get_all(0) == []
-
-        assert {
-            column["name"] for column in inspect(store._engine).get_columns(table_name)
-        } == {"key", "timestamp"}
+        assert set(_column_types(store, table_name)) == {"key", "timestamp"}
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -222,21 +223,50 @@ def test_postgresql_pydantic_models_round_trip_as_jsonb() -> None:
         expected = Payload(name="item", tags=["one", "two"])
         assert store.put(1, key, expected) is True
         assert store.get(1, key) == expected
-
-        column_types = {
-            column["name"]: str(column["type"]).upper()
-            for column in inspect(store._engine).get_columns(table_name)
-        }
-        assert column_types["key"] == "JSONB"
-        assert column_types["value"] == "JSONB"
-        with store._engine.connect() as connection:
-            stored_key, stored_value = connection.execute(
-                select(store._versions.c.key, store._versions.c.value)
-            ).one()
-        assert stored_key == {"tenant": "tenant-a"}
-        assert stored_value == {"name": "item", "tags": ["one", "two"]}
+        column_types = _column_types(store, table_name)
+        assert column_types["key"] == "jsonb"
+        assert column_types["value"] == "jsonb"
+        row = _query(store, f'SELECT key, value FROM "{table_name}"').row(0, named=True)
+        assert _json_value(row["key"]) == {"tenant": "tenant-a"}
+        assert _json_value(row["value"]) == {"name": "item", "tags": ["one", "two"]}
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
+        store.close()
+
+
+def test_postgresql_exact_json_term_search_filters_latest_values() -> None:
+    table_name = f"asof_exact_terms_{uuid4().hex}"
+    store = AsOfStore.from_sql(_POSTGRES_URI, table_name, int, dict, dict)
+    try:
+        assert store.put(1, {"id": "old"}, {"symbol": "AAPL", "type": "STK"})
+        assert store.put(2, {"id": "old"}, {"symbol": "MSFT", "type": "STK"})
+        assert store.put(1, {"id": "match"}, {"symbol": "aapl", "type": "stk"})
+        assert store.put(1, {"id": "other"}, {"symbol": "AAPL", "type": "OPT"})
+
+        assert store.get_all_matching_terms(
+            ["AAPL", "STK"], ["symbol", "type"], exact=True
+        ) == [{"symbol": "aapl", "type": "stk"}]
+        as_of_matches = store.get_all_matching_terms(
+            ["AAPL", "STK"], ["symbol", "type"], 1, exact=True
+        )
+        assert sorted(
+            value["symbol"] for value in as_of_matches if value is not None
+        ) == ["AAPL", "aapl"]
+
+        key_store = AsOfStore.from_sql(
+            _POSTGRES_URI, f"{table_name}_keys", int, dict, type(None)
+        )
+        try:
+            assert key_store.put(1, {"symbol": "aapl", "type": "stk"}, None)
+            assert key_store.put(1, {"symbol": "AAPL", "type": "OPT"}, None)
+            assert key_store.get_keys_matching_terms(
+                ["AAPL", "STK"], ["symbol", "type"], exact=True
+            ) == [{"symbol": "aapl", "type": "stk"}]
+        finally:
+            _drop_table(key_store, f"{table_name}_keys")
+            key_store.close()
+    finally:
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -244,18 +274,12 @@ def test_postgresql_datetime_timestamp_type() -> None:
     table_name = f"asof_datetime_{uuid4().hex}"
     store = AsOfStore.from_sql(_POSTGRES_URI, table_name, datetime, str, str)
     try:
-        timestamp_column = next(
-            column
-            for column in inspect(store._engine).get_columns(table_name)
-            if column["name"] == "timestamp"
-        )
         assert (
-            hasattr(timestamp_column["type"], "timezone")
-            and timestamp_column["type"].timezone is True
+            _column_types(store, table_name)["timestamp"] == "timestamp with time zone"
         )
         _assert_datetime_timestamp_behavior(store)
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
 
 
@@ -267,15 +291,9 @@ def test_postgresql_supports_all_sortable_timestamp_types(
     timestamp_type: type, earlier, later
 ) -> None:
     table_name = f"asof_ts_{timestamp_type.__name__}_{uuid4().hex}"
-    store = AsOfStore.from_sql(
-        _POSTGRES_URI,
-        table_name,
-        timestamp_type,
-        str,
-        str,
-    )
+    store = AsOfStore.from_sql(_POSTGRES_URI, table_name, timestamp_type, str, str)
     try:
         _assert_timestamp_type_ordering(store, earlier, later)
     finally:
-        store._versions.drop(store._engine, checkfirst=True)
+        _drop_table(store, table_name)
         store.close()
