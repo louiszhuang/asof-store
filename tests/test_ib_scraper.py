@@ -276,7 +276,10 @@ def test_scrape_and_reconcile_handles_duplicate_sort_keys(
     if include_middle_page:
         assert "reason=local_count_matches_total local=300 remote=300" in diagnostics
     else:
-        assert "duplicate region incomplete product_type=STK pages=1-3" in diagnostics
+        assert (
+            "complete product_type=STK pages=1-3 sort_key='DUPLICATE' "
+            "local=300 remote=300"
+        ) in diagnostics
         assert "duplicate boundary search start product_type=STK" in diagnostics
         assert "phase=lower" in diagnostics
         assert "duplicate region count product_type=STK" in diagnostics

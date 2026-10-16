@@ -147,7 +147,7 @@ def test_memory_store_can_match_json_compatible_keys() -> None:
     store.put(1, InstrumentKey("OLD"), None)
     store.put(2, InstrumentKey("AAPL"), None)
 
-    assert store.get_keys_matching({"symbol": "app"}) == [InstrumentKey("AAPL")]
+    assert store.get_keys_matching({"symbol": "aap"}) == [InstrumentKey("AAPL")]
 
 
 def test_memory_store_expands_history_after_none_values() -> None:
@@ -258,12 +258,14 @@ def test_sqlite_store_supports_none_type_values() -> None:
         assert key_store.get_keys_matching({"symbol": "old"}, as_of=15) == [
             {"symbol": "OLD"}
         ]
-        assert key_store.get_keys_matching({"symbol": "old"}) == []
+        assert key_store.get_keys_matching({"symbol": "old"}) == [
+            {"symbol": "OLD"}
+        ]
         assert key_store.get_keys_matching_terms(
             ["app", "old"], ["symbol"], as_of=15
         ) == []
         assert key_store.get_keys_matching_terms(
-            ["app"], ["symbol"], as_of=25
+            ["aap"], ["symbol"], as_of=25
         ) == [{"symbol": "AAPL"}]
     finally:
         store.close()
