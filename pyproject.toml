@@ -5,9 +5,7 @@ description = "asof store provides a simple and efficient way to store and retri
 readme = "README.md"
 authors = [{ name = "Louis Zhuang", email = "yzhuang@outlook.com" }]
 requires-python = ">=3.14"
-dependencies = [
-    "pydantic>=2.14.1",
-]
+dependencies = ["pydantic>=2.14.1", "service-registrar"]
 
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,6 +23,9 @@ markers = ["integration: tests that depend on live external services"]
 
 [dependency-groups]
 dev = []
+
+[tool.uv.sources]
+service-registrar = { path = "../service-registrar", editable = true }
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]
