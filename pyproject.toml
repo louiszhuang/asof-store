@@ -28,8 +28,6 @@ markers = ["integration: tests that depend on live external services"]
 [dependency-groups]
 dev = []
 
-[tool.uv.sources]
-service-registrar = { path = "../service-registrar", editable = true }
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]
@@ -37,3 +35,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
+
+[tool.uv.sources]
+#service-registrar = { path = "../service-registrar", editable = true }
