@@ -101,28 +101,45 @@ class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value](Protocol):
     @classmethod
     def from_sql(
         cls,
-        sql_uri: str,
-        table_name: str,
-        timestamp_type: type[Timestamp],
-        key_type: type[Key],
-        value_type: type[Value],
+        sql_uri: str | None = None,
+        table_name: str | None = None,
+        timestamp_type: type[Timestamp] | None = None,
+        key_type: type[Key] | None = None,
+        value_type: type[Value] | None = None,
         *,
         registry: ProviderRegistry | None = None,
         provider: str = "asof-store.sql",
     ) -> AsOfStore[Timestamp, Key, Value]:
-        """Create a SQL-backed store using the provided value types."""
+        """Create a SQL-backed store using provider config and optional URI.
+
+        The selected provider's ``service-registrar.toml`` section supplies
+        defaults. Explicit arguments override its table and type settings;
+        ``sql_uri`` overrides the configured URI when provided.
+        """
+        if table_name is None:
+            raise TypeError("from_sql() requires 'table_name'")
+        if timestamp_type is None or key_type is None or value_type is None:
+            raise TypeError(
+                "from_sql() requires 'timestamp_type', 'key_type', and 'value_type'"
+            )
+        selected_registry = get_registry() if registry is None else registry
+        config = dict(selected_registry._config.get(provider, {}))
+        if sql_uri is not None:
+            config["sql_uri"] = sql_uri
+        config.update(
+            {
+                "table_name": table_name,
+                "timestamp_type": timestamp_type,
+                "key_type": key_type,
+                "value_type": value_type,
+            }
+        )
         return cast(
             "AsOfStore[Timestamp, Key, Value]",
-            (get_registry() if registry is None else registry).create(
+            selected_registry.create(
                 AsOfStore,
                 provider=provider,
-                config={
-                    "sql_uri": sql_uri,
-                    "table_name": table_name,
-                    "timestamp_type": timestamp_type,
-                    "key_type": key_type,
-                    "value_type": value_type,
-                },
+                config=config,
             ),
         )
 

@@ -31,17 +31,18 @@ def test_legacy_service_name_aliases_protocol() -> None:
 
 
 def test_sql_backend_is_created_from_provider_config() -> None:
-    registry = ProviderRegistry(config={"asof-store.sql": {}})
+    registry = ProviderRegistry(
+        config={"custom-sql": {"sql_uri": "sqlite:///:memory:"}}
+    )
     registry.register("custom-sql", SQL_PROVIDER)
     registry.discover()
 
     try:
         store = AsOfStore.from_sql(
-            "sqlite:///:memory:",
-            "plugin_versions",
-            int,
-            str,
-            dict,
+            table_name="plugin_versions",
+            timestamp_type=int,
+            key_type=str,
+            value_type=dict,
             registry=registry,
             provider="custom-sql",
         )
@@ -75,10 +76,10 @@ def test_sql_constructor_preserves_plugin_discovery_import_errors(
 
     with pytest.raises(ImportError, match="unrelated plugin import failed"):
         AsOfStore.from_sql(
-            "sqlite:///:memory:",
-            "plugin_versions",
-            int,
-            str,
-            dict,
+            sql_uri="sqlite:///:memory:",
+            table_name="plugin_versions",
+            timestamp_type=int,
+            key_type=str,
+            value_type=dict,
             registry=ProviderRegistry(),
         )

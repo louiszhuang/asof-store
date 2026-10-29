@@ -78,8 +78,13 @@ def _create_sql(
             "'asof-store[sql-postgres]' for PostgreSQL"
         ) from exc
 
-    sql_uri = config["sql_uri"]
-    table_name = config["table_name"]
+    try:
+        sql_uri = config["sql_uri"]
+        table_name = config["table_name"]
+    except KeyError as exc:
+        raise ValueError(
+            f"SQL provider config is missing required setting {exc.args[0]!r}"
+        ) from exc
     if not isinstance(sql_uri, str):
         raise TypeError("SQL provider config 'sql_uri' must be a string")
     if not isinstance(table_name, str):

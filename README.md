@@ -129,7 +129,7 @@ built-in alias; custom types can use a `module:Type` path. For example, in
 `service-registrar.toml`:
 
 ```toml
-[asof-store.sql]
+["asof-store.sql"]
 sql_uri = "sqlite:///asof.db"
 table_name = "price_versions"
 timestamp_type = "int"
@@ -137,13 +137,15 @@ key_type = "str"
 value_type = "dict"
 ```
 
-Then call `registry.create(AsOfStore, provider="asof-store.sql")`. The
-`AsOfStore.from_memory()` and `AsOfStore.from_sql(...)` convenience
+Then call `registry.create(AsOfStore, provider="asof-store.sql")`, or use
+`AsOfStore.from_sql(table_name=..., timestamp_type=..., key_type=...,
+value_type=...)` to use the configured URI. Passing `sql_uri=...` overrides
+that URI for one store. The `from_memory()` and `from_sql(...)` convenience
 constructors use the process-wide `service_registrar.get_registry()` singleton
 and these same providers by default. Both constructors accept optional
 `registry` and `provider` arguments when selecting another registered
-implementation; the SQL constructor passes its SQL arguments as a per-call
-config override. Install the matching SQL extra
+implementation; `from_sql` overlays the table and type arguments on that
+provider's TOML section. Install the matching SQL extra
 (`asof-store[sql-sqlite]` or `asof-store[sql-postgres]`) to use that provider.
 `AsOfStoreABC` remains available as a compatibility alias for `AsOfStore`.
 
