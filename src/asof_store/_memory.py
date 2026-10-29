@@ -2,14 +2,14 @@ from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from ._abc import AsOfStoreABC, _matches_fields, _matches_terms
+from ._abc import AsOfStore, _matches_fields, _matches_terms
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
 
 
 class MemoryBackend[Timestamp: SupportsAllComparisons, Key, Value](
-    AsOfStoreABC[Timestamp, Key, Value]
+    AsOfStore[Timestamp, Key, Value]
 ):
     """In-memory implementation of the AsOfStore interface."""
 

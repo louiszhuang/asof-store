@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
 
-    from ._abc import AsOfStoreABC
+    from ._abc import AsOfStore
 
 
 class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
@@ -15,7 +15,7 @@ class AsOfView[Timestamp: SupportsAllComparisons, Key, Value]:
 
     def __init__(
         self,
-        store: AsOfStoreABC[Timestamp, Key, Value],
+        store: AsOfStore[Timestamp, Key, Value],
         as_of: Timestamp | None,
     ) -> None:
         self._store = store

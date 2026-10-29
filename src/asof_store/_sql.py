@@ -9,7 +9,7 @@ from uuid import UUID
 
 import polars as pl
 
-from ._abc import AsOfStoreABC, _matches_fields, _matches_terms
+from ._abc import AsOfStore, _matches_fields, _matches_terms
 
 if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
@@ -158,7 +158,7 @@ def _sql_type(python_type: type[Any], *, postgres: bool) -> str:
 
 
 class SqlBackend[Timestamp: SupportsAllComparisons, Key, Value](
-    AsOfStoreABC[Timestamp, Key, Value]
+    AsOfStore[Timestamp, Key, Value]
 ):
     def __init__(
         self,

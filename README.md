@@ -107,6 +107,46 @@ exact=False)` or `get_keys_matching_terms(...)`. Every term must match at least
 one listed field, and all terms must match. SQL backends apply these checks
 after reading latest values with Polars.
 
+## Service plugins
+
+The `AsOfStore` protocol is the service interface implemented by memory and
+SQL backends. Discover them with `service-registrar` and select one when
+constructing the store:
+
+```python
+from asof_store import AsOfStore
+from service_registrar import ProviderRegistry
+
+registry = ProviderRegistry()
+registry.discover()
+store = registry.create(AsOfStore, provider="asof-store.memory")
+```
+
+The SQL provider is named `asof-store.sql` and reads `sql_uri`, `table_name`,
+`timestamp_type`, `key_type`, and `value_type` from its provider configuration.
+Type names may be `int`, `str`, `dict`, `NoneType`, or another supported
+built-in alias; custom types can use a `module:Type` path. For example, in
+`service-registrar.toml`:
+
+```toml
+[asof-store.sql]
+sql_uri = "sqlite:///asof.db"
+table_name = "price_versions"
+timestamp_type = "int"
+key_type = "str"
+value_type = "dict"
+```
+
+Then call `registry.create(AsOfStore, provider="asof-store.sql")`. The
+`AsOfStore.from_memory()` and `AsOfStore.from_sql(...)` convenience
+constructors use the process-wide `service_registrar.get_registry()` singleton
+and these same providers by default. Both constructors accept optional
+`registry` and `provider` arguments when selecting another registered
+implementation; the SQL constructor passes its SQL arguments as a per-call
+config override. Install the matching SQL extra
+(`asof-store[sql-sqlite]` or `asof-store[sql-postgres]`) to use that provider.
+`AsOfStoreABC` remains available as a compatibility alias for `AsOfStore`.
+
 ## PostgreSQL integration tests
 
 The PostgreSQL integration tests use `postgresql://louis@fre.local/louis`.

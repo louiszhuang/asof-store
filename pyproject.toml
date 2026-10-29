@@ -13,6 +13,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 
+[project.entry-points."service_registrar.providers"]
+"asof-store.memory" = "asof_store._providers:MEMORY_PROVIDER"
+"asof-store.sql" = "asof_store._providers:SQL_PROVIDER"
+
 [project.optional-dependencies]
 sql-sqlite = ["polars>=2", "adbc-driver-sqlite>=1.8"]
 sql-postgres = ["polars>=2", "adbc-driver-postgresql>=1.8"]

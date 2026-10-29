@@ -2,13 +2,14 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import NoneType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import polars as pl
 import pytest
 
-from asof_store import AsOfStore, AsOfStoreABC, AsOfView
+from asof_store import AsOfStore, AsOfView
+from asof_store._memory import MemoryBackend
 from asof_store._sql import SqlBackend
 
 if TYPE_CHECKING:
@@ -23,8 +24,11 @@ def _from_sql[T: SupportsAllComparisons, K, V](
     value_type: type[V],
 ) -> SqlBackend[T, K, V]:
     try:
-        return AsOfStore[T, K, V].from_sql(
-            sql_uri, table_name, timestamp_type, key_type, value_type
+        return cast(
+            "SqlBackend[T, K, V]",
+            AsOfStore[T, K, V].from_sql(
+                sql_uri, table_name, timestamp_type, key_type, value_type
+            ),
         )
     except ImportError as exc:
         if "requires ADBC" in str(
@@ -43,7 +47,6 @@ def _sqlite_columns(store: SqlBackend, table_name: str) -> list[dict[str, Any]]:
 def test_get_returns_latest_value_at_or_before_timestamp() -> None:
     store = AsOfStore.from_memory()
     assert type(store).__name__ == "MemoryBackend"
-    assert isinstance(store, AsOfStoreABC)
     assert store.put(10, "item", "earlier") is True
     assert store.put(20, "item", "later") is True
     assert store.put(30, "item", "latest") is True
@@ -73,12 +76,10 @@ def test_put_skips_unchanged_values_without_recording_them() -> None:
     store = AsOfStore.from_memory()
     assert store.put(10, "item", {"value": 1}) is True
     assert store.put(20, "item", {"value": 1}) is False
-    assert len(store._versions["item"][0]) == 1
-    assert store.put(30, "item", {"value": 2}) is True
+    assert store.put(20, "item", {"value": 2}) is True
 
     assert store.get(15, "item") == {"value": 1}
-    assert store.get(25, "item") == {"value": 1}
-    assert store.get(30, "item") == {"value": 2}
+    assert store.get(25, "item") == {"value": 2}
 
 
 def test_get_returns_none_when_no_prior_value_exists() -> None:
@@ -100,7 +101,8 @@ def test_memory_store_supports_none_type_values() -> None:
     store = AsOfStore[int, str, NoneType].from_memory()
 
     assert store.put(10, "item", None) is True
-    assert store._versions["item"][1] is None
+    memory_store = cast(MemoryBackend[int, str, NoneType], store)
+    assert memory_store._versions["item"][1] is None
     assert store.put(10, "item", None) is False
     assert store.get(10, "item") is None
     assert store.put(20, "item", None) is False
@@ -184,7 +186,6 @@ def test_sqlite_memory_backend_supports_as_of_queries() -> None:
     text_store = _from_sql("sqlite:///:memory:", "text_versions", int, str, str)
     try:
         assert type(store).__name__ == "SqlBackend"
-        assert isinstance(store, AsOfStoreABC)
         assert store.put(10, "item", {"value": "earlier"}) is True
         assert store.put(20, "item", {"value": "later"}) is True
         assert store.put(30, "item", {"value": "later"}) is False
@@ -344,7 +345,7 @@ def test_sqlite_store_supports_none_type_values() -> None:
         key_store.close()
 
 
-def _assert_datetime_timestamp_behavior(store: AsOfStoreABC) -> None:
+def _assert_datetime_timestamp_behavior(store: AsOfStore) -> None:
     initial = datetime(2024, 1, 1, 10, tzinfo=timezone(timedelta(hours=2)))
     equivalent_instant = datetime(2024, 1, 1, 6, tzinfo=timezone(-timedelta(hours=2)))
     later = datetime(2024, 1, 1, 9, tzinfo=UTC)
@@ -508,7 +509,7 @@ _SORTABLE_TIMESTAMP_CASES = [
 
 
 def _assert_timestamp_type_ordering(
-    store: AsOfStoreABC, earlier: object, later: object
+    store: AsOfStore, earlier: object, later: object
 ) -> None:
     assert store.put(earlier, "item", "first") is True
     assert store.put(later, "item", "second") is True

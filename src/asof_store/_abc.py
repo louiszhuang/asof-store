@@ -1,6 +1,7 @@
-from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+
+from service_registrar import ProviderRegistry, get_registry
 
 from ._view import AsOfView
 
@@ -79,21 +80,61 @@ def _matches_terms(
     return True
 
 
-class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
-    """Abstract interface implemented by versioned store backends."""
+@runtime_checkable
+class AsOfStore[Timestamp: SupportsAllComparisons, Key, Value](Protocol):
+    """Protocol and factory for versioned store backends."""
 
-    @abstractmethod
+    @classmethod
+    def from_memory(
+        cls,
+        *,
+        registry: ProviderRegistry | None = None,
+        provider: str = "asof-store.memory",
+    ) -> AsOfStore[Timestamp, Key, Value]:
+        return cast(
+            "AsOfStore[Timestamp, Key, Value]",
+            (get_registry() if registry is None else registry).create(
+                AsOfStore, provider=provider
+            ),
+        )
+
+    @classmethod
+    def from_sql(
+        cls,
+        sql_uri: str,
+        table_name: str,
+        timestamp_type: type[Timestamp],
+        key_type: type[Key],
+        value_type: type[Value],
+        *,
+        registry: ProviderRegistry | None = None,
+        provider: str = "asof-store.sql",
+    ) -> AsOfStore[Timestamp, Key, Value]:
+        """Create a SQL-backed store using the provided value types."""
+        return cast(
+            "AsOfStore[Timestamp, Key, Value]",
+            (get_registry() if registry is None else registry).create(
+                AsOfStore,
+                provider=provider,
+                config={
+                    "sql_uri": sql_uri,
+                    "table_name": table_name,
+                    "timestamp_type": timestamp_type,
+                    "key_type": key_type,
+                    "value_type": value_type,
+                },
+            ),
+        )
+
     def put(self, as_of: Timestamp, key: Key, value: Value) -> bool:
         """Record a newer value and report whether a version was stored."""
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
     def get(self, as_of: Timestamp | None, key: Key) -> Value | None:
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
     def get_all(self, as_of: Timestamp | None = None) -> list[Value | None]:
-        raise NotImplementedError
+        ...
 
     def get_all_matching(
         self,
@@ -185,10 +226,12 @@ class AsOfStoreABC[Timestamp: SupportsAllComparisons, Key, Value](ABC):
                 unique_values.add(field_value)
         return unique_values
 
-    @abstractmethod
     def close(self) -> None:
         """Release resources held by the backend."""
-        raise NotImplementedError
+        ...
 
     def as_of(self, as_of: Timestamp | None) -> AsOfView[Timestamp, Key, Value]:
         return AsOfView(self, as_of)
+
+
+AsOfStoreABC = AsOfStore
