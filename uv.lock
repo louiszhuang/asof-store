@@ -294,11 +294,11 @@ wheels = [
 
 [[package]]
 name = "service-registrar"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d1/97/2f2b5aa54724ae66867cc04a1e935d4123cfc81d8bafe357d650b3aa0d3a/service_registrar-0.2.1.tar.gz", hash = "sha256:eec309466bc8781441ef29acb420f745c32377b8baa33aa6fff08234160241a3", size = 7904, upload-time = "2026-10-29T19:42:42.465Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/a4/007b543f8e1521fc099153bbc7074a077c39845428e6788735ddc677636f/service_registrar-0.2.2.tar.gz", hash = "sha256:d2b1323dd882fbed4c34e78f10b50e792b916089d81afd2e3d52fa0e0c30873f", size = 7983, upload-time = "2026-11-01T20:55:26.422Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/3c/22183439a649ddc2606025cc8c7459bd846f9975f06be7500aa281156265/service_registrar-0.2.1-py3-none-any.whl", hash = "sha256:7f2cf96ce2b16eaedf69cdb0ad0885e3975c714b27a144159de73d045283294f", size = 5295, upload-time = "2026-10-29T19:42:41.056Z" },
+    { url = "https://files.pythonhosted.org/packages/09/24/acd64a27cda2854b41fd9ef7a9a5e7462622502836a1f52e3e15eb55ffc5/service_registrar-0.2.2-py3-none-any.whl", hash = "sha256:12ca80c89720b5a8aa01c9694f198456155ec27cb3255a2406b23a09dd4a613c", size = 5816, upload-time = "2026-11-01T20:55:25.283Z" },
 ]
 
 [[package]]

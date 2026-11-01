@@ -5,6 +5,10 @@ from asof_store import AsOfStore
 from asof_store._providers import MEMORY_PROVIDER, SQL_PROVIDER
 
 
+def test_service_protocol_has_package_level_identity() -> None:
+    assert AsOfStore.__module__ == "asof_store"
+
+
 def test_memory_backend_is_discovered_as_a_service_plugin() -> None:
     registry = ProviderRegistry()
     registry.discover()

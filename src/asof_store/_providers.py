@@ -7,7 +7,7 @@ from uuid import UUID
 
 from service_registrar import Provider, ProviderRegistry
 
-from ._abc import AsOfStore
+from . import AsOfStore
 
 _TYPE_NAMES: dict[str, type[Any]] = {
     "bool": bool,
